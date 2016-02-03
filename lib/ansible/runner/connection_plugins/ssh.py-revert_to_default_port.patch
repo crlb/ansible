@@ -1,0 +1,25 @@
+--- ssh.py	2016-02-03 10:32:18.806908466 -0800
++++ ssh.py-2016-01-28	2016-02-03 10:34:52.783802405 -0800
+@@ -20,6 +20,7 @@
+ import re
+ import subprocess
+ import shlex
++import socket
+ import pipes
+ import random
+ import select
+@@ -86,7 +87,13 @@
+             self.common_args += ["-o", "StrictHostKeyChecking=no"]
+ 
+         if self.port is not None:
+-            self.common_args += ["-o", "Port=%d" % (self.port)]
++            test_port_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++            test_port_result = test_port_socket.connect_ex( (self.host, self.port) )
++            test_port_socket.close()
++
++            if test_port_result == 0:
++                self.common_args += ["-o", "Port=%d" % (self.port)]
++
+         if self.private_key_file is not None:
+             self.common_args += ["-o", "IdentityFile=\"%s\"" % os.path.expanduser(self.private_key_file)]
+         elif self.runner.private_key_file is not None:
