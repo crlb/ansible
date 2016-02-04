@@ -1,5 +1,5 @@
---- ssh.py	2016-02-03 10:09:14.333000784 -0800
-+++ ssh.py-2016-01-28	2016-02-03 10:11:45.078834725 -0800
+--- ssh.py	2016-02-04 10:50:25.462047345 -0800
++++ ssh-revert_to_default_port_no_warning_message.py	2016-02-04 10:55:57.293298064 -0800
 @@ -25,6 +25,7 @@
  import pty
  import select
@@ -8,7 +8,7 @@
  import subprocess
  import time
  
-@@ -172,10 +173,17 @@
+@@ -172,10 +173,15 @@
              )
  
          if self._play_context.port is not None:
@@ -25,8 +25,6 @@
 +                    "ANSIBLE_REMOTE_PORT/remote_port/ansible_port set",
 +                    ("-o", "Port={0}".format(self._play_context.port))
 +                )
-+            else:
-+                display.warning('SSH unable to connect to %s:%d, reverting to default port' % (self.host, self._play_context.port))
  
          key = self._play_context.private_key_file
          if key:
