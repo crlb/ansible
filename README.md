@@ -3,6 +3,91 @@
 [![Build Status](https://travis-ci.org/ansible/ansible.svg?branch=devel)](https://travis-ci.org/ansible/ansible)
 
 
+Changing the SSH port with Ansible?
+===================================
+
+This fork of https://github.com/ansible/ansible provides a patch to the "stable-1.9" and "stable-2.0.0.1" (also fits the "devel" branch, circa 2016-01-28) to test a non-standard ssh port specification and revert to the default ssh port (normally 22) if the non-standard port is not open. Essentially, Ansible uses the following logic to employ ssh:
+
+<verbatim>
+      if self.port is not None:
+         ssh -p {{ self.port }} ...
+      else:
+         ssh ...
+<verbatim>
+
+This patch changes the logic to:
+
+<verbatim>
+      if self.port is not None and self.port is OPEN:
+         ssh -p {{ self.port }} ...
+      else:
+         ssh ...
+<verbatim>
+
+Currently the recommended way to handle ssh port changes with an un-patched ansible is to use wait_for/when tasks in a playbook as follows:
+
+<verbatim>
+---
+# file: demo.yaml
+# ansible_ssh_port is used in preference to ansible_port because it works across ansible v1 and v2.
+
+- hosts: all
+  gather_facts: false
+  vars:
+    ansible_ssh_port: 2222
+
+  pre_tasks:
+    - name: Test connection to port 2222
+      local_action:
+        module: wait_for
+        port: "{{ ansible_ssh_port }}"
+        timeout: 5
+      register: test_2222
+      ignore_errors: true
+
+    - name: Set ansible_ssh_port to 22 if cannot connect to 2222
+      set_fact:
+        ansible_ssh_port: 22
+      when: test_2222.elapsed >= 5
+
+    - setup:
+
+  roles:
+    - set_non-std_port
+<verbatim>
+
+In a multi-host environment, this method is unreliable because it tests a single host but applies the result to all hosts. In contrast, the patch tests the port on each host as the connection is required, applies the result only to the tested host and requires no special specification in the playbook:
+
+<verbatim>
+---
+# file: demo.yaml
+# The non-standard ssh port is specified in the host inventory and could be different for different hosts, eg. 2222, 3333, etc.
+
+- hosts: all
+  roles:
+    - set_non-std_port
+<verbatim>
+
+Installation of the patch
+=========================
+
+Two methods of installation are available:
+
+   1. If you have ansible installed via the distros packet manager, the following procedure is recommended:
+      * Locate and switch to the connection plugin directory in your ansible installation. For Ansible version 1.9 on Centos 7.2, this directory is located at "/usr/lib/python2.7/site-packages/ansible/runner/connection_plugins/"
+      * Retrieve the appropriate patch into this directory using wget or curl. For Ansible version 1, the patch is located at "xxx". For version 2, the location is "yyy".
+      * Apply the patch with "patch < ssh-revert_to_default_port.patch".
+      * Recompile ssh.py with "python -m compileall .".
+      * It is also recommended that you exclude Ansible from automatic updates to avoid the patch being inadvertently removed.
+   1. If you do not have ansible installed and wish to install it from the git hub repository, use the following procedure:
+      * Clone the Ansible fork with "git clone git@github.com:crlb/ansible.git".
+      * Switch to the cloned repository (ie. "cd ansible") and  choose the version to install by using the the "git checkout {{branch}}" command. For version 1, the patch is supplied in the "stable-1.9" branch and for version 2, in the "stable-2.0.0.1" branch (the patches may fit other releases, see above).
+      * Install the Ansible core modules with "git submodule update --init --recursive".
+      * Install the patch ansible with "python setup.py install".
+      * Install the patched ansible with "python setup.py install".
+
+And now, over to ...
+
 Ansible
 =======
 
