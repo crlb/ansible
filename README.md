@@ -8,25 +8,25 @@ Changing the SSH port with Ansible?
 
 This fork of https://github.com/ansible/ansible provides a patch to the "stable-1.9" and "stable-2.0.0.1" (also fits the "devel" branch, circa 2016-01-28) to test a non-standard ssh port specification and revert to the default ssh port (normally 22) if the non-standard port is not open. Essentially, Ansible uses the following logic to employ ssh:
 
-<verbatim>
+<pre><code>
       if self.port is not None:
          ssh -p {{ self.port }} ...
       else:
          ssh ...
-<verbatim>
+</code></pre>
 
 This patch changes the logic to:
 
-<verbatim>
+<pre><code>
       if self.port is not None and self.port is OPEN:
          ssh -p {{ self.port }} ...
       else:
          ssh ...
-<verbatim>
+</code></pre>
 
 Currently the recommended way to handle ssh port changes with an un-patched ansible is to use wait_for/when tasks in a playbook as follows:
 
-<verbatim>
+<pre><code>
 ---
 # file: demo.yaml
 # ansible_ssh_port is used in preference to ansible_port because it works across ansible v1 and v2.
@@ -54,11 +54,11 @@ Currently the recommended way to handle ssh port changes with an un-patched ansi
 
   roles:
     - set_non-std_port
-<verbatim>
+</code></pre>
 
 In a multi-host environment, this method is unreliable because it tests a single host but applies the result to all hosts. In contrast, the patch tests the port on each host as the connection is required, applies the result only to the tested host and requires no special specification in the playbook:
 
-<verbatim>
+<pre><code>
 ---
 # file: demo.yaml
 # The non-standard ssh port is specified in the host inventory and could be different for different hosts, eg. 2222, 3333, etc.
@@ -66,7 +66,7 @@ In a multi-host environment, this method is unreliable because it tests a single
 - hosts: all
   roles:
     - set_non-std_port
-<verbatim>
+</code></pre>
 
 Installation of the patch
 =========================
