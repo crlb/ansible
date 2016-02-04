@@ -1,5 +1,5 @@
---- ssh.py	2016-02-03 10:32:18.806908466 -0800
-+++ ssh.py-2016-01-28	2016-02-03 10:34:52.783802405 -0800
+--- ssh.py	2016-02-04 07:21:27.001254830 -0800
++++ ssh.py-2016-01-28	2016-02-04 09:42:43.788449472 -0800
 @@ -20,6 +20,7 @@
  import re
  import subprocess
@@ -8,7 +8,15 @@
  import pipes
  import random
  import select
-@@ -86,7 +87,13 @@
+@@ -31,6 +32,7 @@
+ from hashlib import sha1
+ import ansible.constants as C
+ from ansible.callbacks import vvv
++from ansible.callbacks import display
+ from ansible import errors
+ from ansible import utils
+ 
+@@ -86,7 +88,15 @@
              self.common_args += ["-o", "StrictHostKeyChecking=no"]
  
          if self.port is not None:
@@ -19,6 +27,8 @@
 +
 +            if test_port_result == 0:
 +                self.common_args += ["-o", "Port=%d" % (self.port)]
++            else:
++                display("SSH unable to connect to " + self.host + ":" + str(self.port) + ", reverting to default port", color='purple')
 +
          if self.private_key_file is not None:
              self.common_args += ["-o", "IdentityFile=\"%s\"" % os.path.expanduser(self.private_key_file)]

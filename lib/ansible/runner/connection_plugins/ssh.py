@@ -32,6 +32,7 @@ import pty
 from hashlib import sha1
 import ansible.constants as C
 from ansible.callbacks import vvv
+from ansible.callbacks import display
 from ansible import errors
 from ansible import utils
 
@@ -93,6 +94,8 @@ class Connection(object):
 
             if test_port_result == 0:
                 self.common_args += ["-o", "Port=%d" % (self.port)]
+            else:
+                display("SSH unable to connect to " + self.host + ":" + str(self.port) + ", reverting to default port", color='purple')
 
         if self.private_key_file is not None:
             self.common_args += ["-o", "IdentityFile=\"%s\"" % os.path.expanduser(self.private_key_file)]
