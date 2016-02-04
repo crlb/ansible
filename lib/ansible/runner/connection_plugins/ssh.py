@@ -20,7 +20,6 @@ import os
 import re
 import subprocess
 import shlex
-import socket
 import pipes
 import random
 import select
@@ -32,7 +31,6 @@ import pty
 from hashlib import sha1
 import ansible.constants as C
 from ansible.callbacks import vvv
-from ansible.callbacks import display
 from ansible import errors
 from ansible import utils
 
@@ -88,15 +86,7 @@ class Connection(object):
             self.common_args += ["-o", "StrictHostKeyChecking=no"]
 
         if self.port is not None:
-            test_port_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            test_port_result = test_port_socket.connect_ex( (self.host, self.port) )
-            test_port_socket.close()
-
-            if test_port_result == 0:
-                self.common_args += ["-o", "Port=%d" % (self.port)]
-            else:
-                display("SSH unable to connect to " + self.host + ":" + str(self.port) + ", reverting to default port", color='purple')
-
+            self.common_args += ["-o", "Port=%d" % (self.port)]
         if self.private_key_file is not None:
             self.common_args += ["-o", "IdentityFile=\"%s\"" % os.path.expanduser(self.private_key_file)]
         elif self.runner.private_key_file is not None:

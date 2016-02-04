@@ -1,5 +1,5 @@
---- ssh.py	2016-02-04 07:21:27.001254830 -0800
-+++ ssh.py-2016-01-28	2016-02-04 09:42:43.788449472 -0800
+--- ssh.py	2016-02-04 10:19:12.420625775 -0800
++++ ssh-revert_to_default_port_no_warning_message.py	2016-02-04 10:21:57.036220471 -0800
 @@ -20,6 +20,7 @@
  import re
  import subprocess
@@ -8,15 +8,7 @@
  import pipes
  import random
  import select
-@@ -31,6 +32,7 @@
- from hashlib import sha1
- import ansible.constants as C
- from ansible.callbacks import vvv
-+from ansible.callbacks import display
- from ansible import errors
- from ansible import utils
- 
-@@ -86,7 +88,15 @@
+@@ -86,7 +87,13 @@
              self.common_args += ["-o", "StrictHostKeyChecking=no"]
  
          if self.port is not None:
@@ -27,8 +19,6 @@
 +
 +            if test_port_result == 0:
 +                self.common_args += ["-o", "Port=%d" % (self.port)]
-+            else:
-+                display("SSH unable to connect to " + self.host + ":" + str(self.port) + ", reverting to default port", color='purple')
 +
          if self.private_key_file is not None:
              self.common_args += ["-o", "IdentityFile=\"%s\"" % os.path.expanduser(self.private_key_file)]
