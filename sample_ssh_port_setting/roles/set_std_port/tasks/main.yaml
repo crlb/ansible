@@ -1,0 +1,15 @@
+---
+# file: roles/common/tasks/ssh.yaml
+
+- name: change firewall to open standard ssh port on public zone
+  firewalld: service=ssh state=enabled permanent=true immediate=true zone=public
+
+- name: configure sshd
+  template: src=sshd_config.j2 dest=/etc/ssh/sshd_config
+  notify:
+    - restart sshd
+
+- meta: flush_handlers
+
+- name: change firewall to close nonstandard ssh port on public zone
+  firewalld: port=3121/tcp state=disabled permanent=true immediate=true zone=public
