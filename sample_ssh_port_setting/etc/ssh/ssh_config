@@ -1,6 +1,6 @@
 ###################################################################################### 
 ###                                                                                ###
-### If you would like to use Ansible to change from one non-standard port to,      ###
+### If you would like to use Ansible to change from one non-standard port to       ###
 ### another, you can temporarily specify the current non-standard port as the      ###
 ### default for the host (see the "Host" section at the end of this file) and      ###
 ### specify  the new non-standard port in the Ansible inventory.                   ###
