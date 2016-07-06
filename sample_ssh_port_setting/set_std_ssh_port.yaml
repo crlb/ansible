@@ -1,0 +1,6 @@
+---
+# file: set_std_ssh_port.yaml - demonstrate port setting/unsetting.
+
+- hosts: hosta:hostb
+  roles:
+  - set_std_port
