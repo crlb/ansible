@@ -204,7 +204,7 @@ It might happen like so::
 
     - authorized_key: "user={{ item.0.name }} key='{{ lookup('file', item.1) }}'"
       with_subelements:
-         - users
+         - "{{ users }}"
          - authorized
 
 Given the mysql hosts and privs subkey lists, you can also iterate over a list in a nested subkey::
@@ -212,7 +212,7 @@ Given the mysql hosts and privs subkey lists, you can also iterate over a list i
     - name: Setup MySQL users
       mysql_user: name={{ item.0.name }} password={{ item.0.mysql.password }} host={{ item.1 }} priv={{ item.0.mysql.privs | join('/') }}
       with_subelements:
-        - users
+        - "{{ users }}"
         - mysql.hosts
 
 Subelements walks a list of hashes (aka dictionaries) and then traverses a list with a given (nested sub-)key inside of those
@@ -340,7 +340,7 @@ Iterating Over The Results of a Program Execution
 .. note:: This is an uncommon thing to want to do, but we're documenting it for completeness.  You probably won't be reaching for this one often.
 
 Sometimes you might want to execute a program, and based on the output of that program, loop over the results of that line by line.
-Ansible provides a neat way to do that, though you should remember, this is always executed on the control machine, not the local
+Ansible provides a neat way to do that, though you should remember, this is always executed on the control machine, not the remote
 machine::
 
     - name: Example of looping over a command result
@@ -536,35 +536,65 @@ There is also a specific lookup plugin ``inventory_hostname`` that can be used l
 
     # show all the hosts in the inventory
     - debug: msg={{ item }}
-      with_inventory_hostname: all
+      with_inventory_hostnames: all
 
     # show all the hosts matching the pattern, ie all but the group www
     - debug: msg={{ item }}
-      with_inventory_hostname: all:!www
+      with_inventory_hostnames: all:!www
 
 More information on the patterns can be found on :doc:`intro_patterns`
 
-.. _loops_and_includes:
+.. _loop_control:
 
-Loops and Includes
-``````````````````
+Loop Control
+````````````
 
-In 2.0 you are able to use `with_` loops and task includes (but not playbook includes), this adds the ability to loop over the set of tasks in one shot.
-There are a couple of things that you need to keep in mind, a included task that has it's own `with_` loop will overwrite the value of the special `item` variable.
-So if you want access to both the include's `item` and the current task's `item` you should use `set_fact` to create a alias to the outer one.::
+.. versionadded: 2.1
+
+In 2.0 you are again able to use `with_` loops and task includes (but not playbook includes). This adds the ability to loop over the set of tasks in one shot.
+Ansible by default sets the loop variable `item` for each loop, which causes these nested loops to overwrite the value of `item` from the "outer" loops.
+As of Ansible 2.1, the `loop_control` option can be used to specify the name of the variable to be used for the loop::
+
+    # main.yml
+    - include: test.yml outer_loop="{{outer_item}}"
+      with_items:
+        - 1
+        - 2
+        - 3
+      loop_control:
+        loop_var: outer_item
+
+    # inner.yml
+    - debug: msg="outer item={{outer_loop}} inner item={{item}}"
+      with_items:
+        - a
+        - b
+        - c
+
+.. note:: If Ansible detects that the current loop is using a variable which has already been defined, it will raise an error to fail the task.
 
 
+.. _loops_and_includes_2.0:
+
+Loops and Includes in 2.0
+`````````````````````````
+
+Because `loop_control` is not available in Ansible 2.0, when using an include with a loop you should use `set_fact` to save the "outer" loops value
+for `item`::
+
+    # main.yml
     - include: test.yml
       with_items:
         - 1
         - 2
         - 3
 
-in test.yml::
+    # inner.yml
+    - set_fact:
+        outer_item: "{{item}}"
 
-    - set_fact: outer_loop="{{item}}"
-
-    - debug: msg="outer item={{outer_loop}} inner item={{item}}"
+    - debug:
+        msg: "outer item={{outer_item}} inner item={{item}}"
       with_items:
         - a
         - b

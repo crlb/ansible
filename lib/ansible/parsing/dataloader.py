@@ -20,12 +20,12 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 import copy
-import json
 import os
-import stat
+import json
 import subprocess
+import tempfile
+from yaml import YAMLError
 
-from yaml import load, YAMLError
 from ansible.compat.six import text_type, string_types
 
 from ansible.errors import AnsibleFileNotFound, AnsibleParserError, AnsibleError
@@ -36,7 +36,7 @@ from ansible.parsing.yaml.loader import AnsibleLoader
 from ansible.parsing.yaml.objects import AnsibleBaseYAMLObject, AnsibleUnicode
 from ansible.module_utils.basic import is_executable
 from ansible.utils.path import unfrackpath
-from ansible.utils.unicode import to_unicode
+from ansible.utils.unicode import to_unicode, to_bytes
 
 class DataLoader():
 
@@ -60,6 +60,7 @@ class DataLoader():
     def __init__(self):
         self._basedir = '.'
         self._FILE_CACHE = dict()
+        self._tempfiles = set()
 
         # initialize the vault stuff with an empty password
         self.set_vault_password(None)
@@ -73,31 +74,30 @@ class DataLoader():
         Creates a python datastructure from the given data, which can be either
         a JSON or YAML string.
         '''
-
+        new_data = None
         try:
             # we first try to load this data as JSON
-            return json.loads(data)
+            new_data = json.loads(data)
         except:
-            # if loading JSON failed for any reason, we go ahead
-            # and try to parse it as YAML instead
-
+            # must not be JSON, let the rest try
             if isinstance(data, AnsibleUnicode):
                 # The PyYAML's libyaml bindings use PyUnicode_CheckExact so
                 # they are unable to cope with our subclass.
                 # Unwrap and re-wrap the unicode so we can keep track of line
                 # numbers
-                new_data = text_type(data)
+                in_data = text_type(data)
             else:
-                new_data = data
+                in_data = data
             try:
-                new_data = self._safe_load(new_data, file_name=file_name)
+                new_data = self._safe_load(in_data, file_name=file_name)
             except YAMLError as yaml_exc:
                 self._handle_error(yaml_exc, file_name, show_content)
 
             if isinstance(data, AnsibleUnicode):
                 new_data = AnsibleUnicode(new_data)
                 new_data.ansible_pos = data.ansible_pos
-            return new_data
+
+        return new_data
 
     def load_from_file(self, file_name):
         ''' Loads data from a file, which can contain either JSON or YAML.  '''
@@ -121,15 +121,15 @@ class DataLoader():
 
     def path_exists(self, path):
         path = self.path_dwim(path)
-        return os.path.exists(path)
+        return os.path.exists(to_bytes(path, errors='strict'))
 
     def is_file(self, path):
         path = self.path_dwim(path)
-        return os.path.isfile(path) or path == os.devnull
+        return os.path.isfile(to_bytes(path, errors='strict')) or path == os.devnull
 
     def is_directory(self, path):
         path = self.path_dwim(path)
-        return os.path.isdir(path)
+        return os.path.isdir(to_bytes(path, errors='strict'))
 
     def list_directory(self, path):
         path = self.path_dwim(path)
@@ -147,7 +147,10 @@ class DataLoader():
         try:
             return loader.get_single_data()
         finally:
-            loader.dispose()
+            try:
+                loader.dispose()
+            except AttributeError:
+                pass # older versions of yaml don't have dispose function, ignore
 
     def _get_file_contents(self, file_name):
         '''
@@ -157,12 +160,13 @@ class DataLoader():
         if not file_name or not isinstance(file_name, string_types):
             raise AnsibleParserError("Invalid filename: '%s'" % str(file_name))
 
-        if not self.path_exists(file_name) or not self.is_file(file_name):
+        b_file_name = to_bytes(file_name)
+        if not self.path_exists(b_file_name) or not self.is_file(b_file_name):
             raise AnsibleFileNotFound("the file_name '%s' does not exist, or is not readable" % file_name)
 
         show_content = True
         try:
-            with open(file_name, 'rb') as f:
+            with open(b_file_name, 'rb') as f:
                 data = f.read()
                 if self._vault.is_encrypted(data):
                     data = self._vault.decrypt(data)
@@ -206,13 +210,15 @@ class DataLoader():
         '''
 
         given = unquote(given)
+        given = to_unicode(given, errors='strict')
 
-        if given.startswith("/"):
+        if given.startswith(u"/"):
             return os.path.abspath(given)
-        elif given.startswith("~"):
+        elif given.startswith(u"~"):
             return os.path.abspath(os.path.expanduser(given))
         else:
-            return os.path.abspath(os.path.join(self._basedir, given))
+            basedir = to_unicode(self._basedir, errors='strict')
+            return os.path.abspath(os.path.join(basedir, given))
 
     def path_dwim_relative(self, path, dirname, source):
         '''
@@ -236,8 +242,8 @@ class DataLoader():
             basedir = unfrackpath(path)
 
             # is it a role and if so make sure you get correct base path
-            if path.endswith('tasks') and os.path.exists(os.path.join(path,'main.yml')) \
-                or os.path.exists(os.path.join(path,'tasks/main.yml')):
+            if path.endswith('tasks') and os.path.exists(to_bytes(os.path.join(path,'main.yml'), errors='strict')) \
+                or os.path.exists(to_bytes(os.path.join(path,'tasks/main.yml'), errors='strict')):
                 isrole = True
                 if path.endswith('tasks'):
                     basedir = unfrackpath(os.path.dirname(path))
@@ -260,7 +266,7 @@ class DataLoader():
             search.append(self.path_dwim(source))
 
         for candidate in search:
-            if os.path.exists(candidate):
+            if os.path.exists(to_bytes(candidate, errors='strict')):
                 break
 
         return candidate
@@ -271,8 +277,8 @@ class DataLoader():
         retrieve password from STDOUT
         """
 
-        this_path = os.path.realpath(os.path.expanduser(vault_password_file))
-        if not os.path.exists(this_path):
+        this_path = os.path.realpath(to_bytes(os.path.expanduser(vault_password_file), errors='strict'))
+        if not os.path.exists(to_bytes(this_path, errors='strict')):
             raise AnsibleFileNotFound("The vault password file %s was not found" % this_path)
 
         if self.is_executable(this_path):
@@ -290,3 +296,72 @@ class DataLoader():
                 f.close()
             except (OSError, IOError) as e:
                 raise AnsibleError("Could not read vault password file %s: %s" % (this_path, e))
+
+    def _create_content_tempfile(self, content):
+        ''' Create a tempfile containing defined content '''
+        fd, content_tempfile = tempfile.mkstemp()
+        f = os.fdopen(fd, 'wb')
+        content = to_bytes(content)
+        try:
+            f.write(content)
+        except Exception as err:
+            os.remove(content_tempfile)
+            raise Exception(err)
+        finally:
+            f.close()
+        return content_tempfile
+
+    def get_real_file(self, file_path):
+        """
+        If the file is vault encrypted return a path to a temporary decrypted file
+        If the file is not encrypted then the path is returned
+        Temporary files are cleanup in the destructor
+        """
+
+        if not file_path or not isinstance(file_path, string_types):
+            raise AnsibleParserError("Invalid filename: '%s'" % str(file_path))
+
+        if not self.path_exists(file_path) or not self.is_file(file_path):
+            raise AnsibleFileNotFound("the file_name '%s' does not exist, or is not readable" % file_path)
+
+        if not self._vault:
+            self._vault = VaultLib(password="")
+
+        real_path = self.path_dwim(file_path)
+
+        try:
+            with open(to_bytes(real_path), 'rb') as f:
+                data = f.read()
+                if self._vault.is_encrypted(data):
+                    # if the file is encrypted and no password was specified,
+                    # the decrypt call would throw an error, but we check first
+                    # since the decrypt function doesn't know the file name
+                    if not self._vault_password:
+                        raise AnsibleParserError("A vault password must be specified to decrypt %s" % file_path)
+
+                    data = self._vault.decrypt(data)
+                    # Make a temp file
+                    real_path = self._create_content_tempfile(data)
+                    self._tempfiles.add(real_path)
+
+            return real_path
+
+        except (IOError, OSError) as e:
+            raise AnsibleParserError("an error occurred while trying to read the file '%s': %s" % (real_path, str(e)))
+
+    def cleanup_tmp_file(self, file_path):
+        """
+        Removes any temporary files created from a previous call to
+        get_real_file. file_path must be the path returned from a
+        previous call to get_real_file.
+        """
+        if file_path in self._tempfiles:
+            os.unlink(file_path)
+            self._tempfiles.remove(file_path);
+
+    def cleanup_all_tmp_files(self):
+        for f in self._tempfiles:
+            try:
+                self.cleanup_tmp_file(f)
+            except:
+                pass #TODO: this should at least warn

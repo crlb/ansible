@@ -26,6 +26,7 @@ from ansible.errors import AnsibleError, AnsibleParserError
 from ansible.executor.task_executor import TaskExecutor
 from ansible.playbook.play_context import PlayContext
 from ansible.plugins import action_loader, lookup_loader
+from ansible.parsing.yaml.objects import AnsibleUnicode
 
 from units.mock.loader import DictDataLoader
 
@@ -45,6 +46,7 @@ class TestTaskExecutor(unittest.TestCase):
         mock_shared_loader = MagicMock()
         new_stdin = None
         job_vars = dict()
+        mock_queue = MagicMock()
         te = TaskExecutor(
             host = mock_host,
             task = mock_task,
@@ -53,6 +55,7 @@ class TestTaskExecutor(unittest.TestCase):
             new_stdin = new_stdin,
             loader = fake_loader,
             shared_loader_obj = mock_shared_loader,
+            rslt_q = mock_queue,
         )
 
     def test_task_executor_run(self):
@@ -66,6 +69,7 @@ class TestTaskExecutor(unittest.TestCase):
         mock_play_context = MagicMock()
 
         mock_shared_loader = MagicMock()
+        mock_queue = MagicMock()
 
         new_stdin = None
         job_vars = dict()
@@ -78,6 +82,7 @@ class TestTaskExecutor(unittest.TestCase):
             new_stdin = new_stdin,
             loader = fake_loader,
             shared_loader_obj = mock_shared_loader,
+            rslt_q = mock_queue,
         )
 
         te._get_loop_items = MagicMock(return_value=None)
@@ -97,7 +102,7 @@ class TestTaskExecutor(unittest.TestCase):
 
     def test_task_executor_get_loop_items(self):
         fake_loader = DictDataLoader({})
-        
+
         mock_host = MagicMock()
 
         mock_task = MagicMock()
@@ -111,6 +116,7 @@ class TestTaskExecutor(unittest.TestCase):
 
         new_stdin = None
         job_vars = dict()
+        mock_queue = MagicMock()
 
         te = TaskExecutor(
             host = mock_host,
@@ -120,6 +126,7 @@ class TestTaskExecutor(unittest.TestCase):
             new_stdin = new_stdin,
             loader = fake_loader,
             shared_loader_obj = mock_shared_loader,
+            rslt_q = mock_queue,
         )
 
         items = te._get_loop_items()
@@ -142,6 +149,7 @@ class TestTaskExecutor(unittest.TestCase):
         mock_play_context = MagicMock()
 
         mock_shared_loader = MagicMock()
+        mock_queue = MagicMock()
 
         new_stdin = None
         job_vars = dict()
@@ -154,6 +162,7 @@ class TestTaskExecutor(unittest.TestCase):
             new_stdin = new_stdin,
             loader = fake_loader,
             shared_loader_obj = mock_shared_loader,
+            rslt_q = mock_queue,
         )
 
         def _execute(variables):
@@ -172,8 +181,10 @@ class TestTaskExecutor(unittest.TestCase):
 
         mock_host = MagicMock()
 
+        loop_var = 'item'
+
         def _evaluate_conditional(templar, variables):
-            item = variables.get('item')
+            item = variables.get(loop_var)
             if item == 'b':
                 return False
             return True
@@ -184,6 +195,7 @@ class TestTaskExecutor(unittest.TestCase):
         mock_play_context = MagicMock()
 
         mock_shared_loader = None
+        mock_queue = MagicMock()
 
         new_stdin = None
         job_vars = dict(pkg_mgr='yum')
@@ -196,32 +208,134 @@ class TestTaskExecutor(unittest.TestCase):
             new_stdin = new_stdin,
             loader = fake_loader,
             shared_loader_obj = mock_shared_loader,
+            rslt_q = mock_queue,
         )
 
+        #
+        # No replacement
+        #
+        mock_task.action = 'yum'
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        self.assertEqual(new_items, ['a', 'b', 'c'])
+
         mock_task.action = 'foo'
-        new_items = te._squash_items(items=items, variables=job_vars)
+        mock_task.args={'name': '{{item}}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
         self.assertEqual(new_items, ['a', 'b', 'c'])
 
         mock_task.action = 'yum'
-        new_items = te._squash_items(items=items, variables=job_vars)
+        mock_task.args={'name': 'static'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        self.assertEqual(new_items, ['a', 'b', 'c'])
+
+        mock_task.action = 'yum'
+        mock_task.args={'name': '{{pkg_mgr}}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        self.assertEqual(new_items, ['a', 'b', 'c'])
+
+        mock_task.action = '{{unknown}}'
+        mock_task.args={'name': '{{item}}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        self.assertEqual(new_items, ['a', 'b', 'c'])
+
+        # Maybe should raise an error in this case.  The user would have to specify:
+        # - yum: name="{{ packages[item] }}"
+        #   with_items:
+        #     - ['a', 'b']
+        #     - ['foo', 'bar']
+        # you can't use a list as a dict key so that would probably throw
+        # an error later.  If so, we can throw it now instead.
+        # Squashing in this case would not be intuitive as the user is being
+        # explicit in using each list entry as a key.  
+        job_vars = dict(pkg_mgr='yum', packages={ "a": "foo", "b": "bar", "foo": "baz", "bar": "quux" })
+        items = [['a', 'b'], ['foo', 'bar']]
+        mock_task.action = 'yum'
+        mock_task.args = {'name': '{{ packages[item] }}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        self.assertEqual(new_items, items)
+
+        #
+        # Replaces
+        #
+        items = ['a', 'b', 'c']
+        mock_task.action = 'yum'
+        mock_task.args={'name': '{{item}}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
         self.assertEqual(new_items, [['a','c']])
 
         mock_task.action = '{{pkg_mgr}}'
-        new_items = te._squash_items(items=items, variables=job_vars)
+        mock_task.args={'name': '{{item}}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
         self.assertEqual(new_items, [['a', 'c']])
 
-        # Smoketests -- these won't optimize but make sure that they don't
-        # traceback either
-        mock_task.action = '{{unknown}}'
-        new_items = te._squash_items(items=items, variables=job_vars)
-        self.assertEqual(new_items, ['a', 'b', 'c'])
+        # New loop_var
+        mock_task.action = 'yum'
+        mock_task.args = {'name': '{{a_loop_var_item}}'}
+        mock_task.loop_control = {'loop_var': 'a_loop_var_item'}
+        loop_var = 'a_loop_var_item'
+        new_items = te._squash_items(items=items, loop_var='a_loop_var_item', variables=job_vars)
+        self.assertEqual(new_items, [['a', 'c']])
+        loop_var = 'item'
+
+        #
+        # These are presently not optimized but could be in the future.
+        # Expected output if they were optimized is given as a comment
+        # Please move these to a different section if they are optimized
+        #
+
+        # Squashing lists
+        job_vars = dict(pkg_mgr='yum')
+        items = [['a', 'b'], ['foo', 'bar']]
+        mock_task.action = 'yum'
+        mock_task.args = {'name': '{{ item }}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        #self.assertEqual(new_items, [['a', 'b', 'foo', 'bar']])
+        self.assertEqual(new_items, items)
+
+        # Retrieving from a dict
+        items = ['a', 'b', 'foo']
+        mock_task.action = 'yum'
+        mock_task.args = {'name': '{{ packages[item] }}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        #self.assertEqual(new_items, [['foo', 'baz']])
+        self.assertEqual(new_items, items)
+
+        # Another way to retrieve from a dict
+        job_vars = dict(pkg_mgr='yum')
+        items = [{'package': 'foo'}, {'package': 'bar'}]
+        mock_task.action = 'yum'
+        mock_task.args = {'name': '{{ item["package"] }}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        #self.assertEqual(new_items, [['foo', 'bar']])
+        self.assertEqual(new_items, items)
 
         items = [dict(name='a', state='present'),
                 dict(name='b', state='present'),
                 dict(name='c', state='present')]
         mock_task.action = 'yum'
-        new_items = te._squash_items(items=items, variables=job_vars)
+        mock_task.args={'name': '{{item.name}}', 'state': '{{item.state}}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
         self.assertEqual(new_items, items)
+        #self.assertEqual(new_items, [dict(name=['a', 'b', 'c'], state='present')])
+
+        items = [dict(name='a', state='present'),
+                dict(name='b', state='present'),
+                dict(name='c', state='absent')]
+        mock_task.action = 'yum'
+        mock_task.args={'name': '{{item.name}}', 'state': '{{item.state}}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        self.assertEqual(new_items, items)
+        #self.assertEqual(new_items, [dict(name=['a', 'b'], state='present'),
+        #        dict(name='c', state='absent')])
+
+        # Could do something like this to recover from bad deps in a package
+        job_vars = dict(pkg_mgr='yum', packages=['a', 'b'])
+        items = [ 'absent', 'latest' ]
+        mock_task.action = 'yum'
+        mock_task.args = {'name': '{{ packages }}', 'state': '{{ item }}'}
+        new_items = te._squash_items(items=items, loop_var='item', variables=job_vars)
+        self.assertEqual(new_items, items)
+
 
     def test_task_executor_execute(self):
         fake_loader = DictDataLoader({})
@@ -242,6 +356,7 @@ class TestTaskExecutor(unittest.TestCase):
         # here: on Python 2 comparing MagicMock() > 0 returns True, and the
         # other reason is that if I specify 0 here, the test fails. ;)
         mock_task.async = 1
+        mock_task.poll = 0
 
         mock_play_context = MagicMock()
         mock_play_context.post_validate.return_value = None
@@ -252,6 +367,7 @@ class TestTaskExecutor(unittest.TestCase):
         mock_connection._connect.return_value = None
 
         mock_action = MagicMock()
+        mock_queue = MagicMock()
 
         shared_loader = None
         new_stdin = None
@@ -265,6 +381,7 @@ class TestTaskExecutor(unittest.TestCase):
             new_stdin = new_stdin,
             loader = fake_loader,
             shared_loader_obj = shared_loader,
+            rslt_q = mock_queue,
         )
 
         te._get_connection = MagicMock(return_value=mock_connection)
@@ -273,11 +390,11 @@ class TestTaskExecutor(unittest.TestCase):
         mock_action.run.return_value = dict(ansible_facts=dict())
         res = te._execute()
 
-        mock_task.changed_when = "1 == 1"
+        mock_task.changed_when = MagicMock(return_value=AnsibleUnicode("1 == 1"))
         res = te._execute()
 
         mock_task.changed_when = None
-        mock_task.failed_when = "1 == 1"
+        mock_task.failed_when = MagicMock(return_value=AnsibleUnicode("1 == 1"))
         res = te._execute()
 
         mock_task.failed_when = None
@@ -303,6 +420,7 @@ class TestTaskExecutor(unittest.TestCase):
         mock_connection = MagicMock()
 
         mock_action = MagicMock()
+        mock_queue = MagicMock()
 
         shared_loader = MagicMock()
         shared_loader.action_loader = action_loader
@@ -318,6 +436,7 @@ class TestTaskExecutor(unittest.TestCase):
             new_stdin = new_stdin,
             loader = fake_loader,
             shared_loader_obj = shared_loader,
+            rslt_q = mock_queue,
         )
 
         te._connection = MagicMock()

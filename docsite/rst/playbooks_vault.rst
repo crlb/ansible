@@ -29,7 +29,7 @@ To create a new encrypted data file, run the following command::
 
 First you will be prompted for a password.  The password used with vault currently must be the same for all files you wish to use together at the same time.
 
-After providing a password, the tool will launch whatever editor you have defined with $EDITOR, and defaults to vim.  Once you are done with the editor session, the file will be saved as encrypted data.
+After providing a password, the tool will launch whatever editor you have defined with $EDITOR, and defaults to vi (before 2.1 the default was vim).  Once you are done with the editor session, the file will be saved as encrypted data.
 
 The default cipher is AES (which is shared-secret based).
 
@@ -103,6 +103,9 @@ Alternatively, passwords can be specified with a file or a script, the script ve
     ansible-playbook site.yml --vault-password-file ~/.vault_pass.py
 
 The password should be a string stored as a single line in the file.
+
+.. note::
+   You can also set ``ANSIBLE_VAULT_PASSWORD_FILE`` environment variable, e.g. ``ANSIBLE_VAULT_PASSWORD_FILE=~/.vault_pass.txt`` and Ansible will automatically search for the password in that file.
 
 If you are using a script instead of a flat file, ensure that it is marked as executable, and that the password is printed to standard output.  If your script needs to prompt for data, prompts can be sent to standard error.
 

@@ -70,6 +70,11 @@ try:
     HAS_PBKDF2HMAC = True
 except ImportError:
     pass
+except Exception as e:
+    if e.__module__ == 'pkg_resources' and e.__class__.__name__ == 'DistributionNotFound':
+        pass
+    else:
+        raise
 
 from ansible.compat.six import PY3
 from ansible.utils.unicode import to_unicode, to_bytes
@@ -275,8 +280,12 @@ class VaultEditor:
 
         try:
             r = call(['shred', tmp_path])
-        except OSError:
+        except (OSError, ValueError):
             # shred is not available on this system, or some other error occured.
+            # ValueError caught because OS X El Capitan is raising an
+            # exception big enough to hit a limit in python2-2.7.11 and below.
+            # Symptom is ValueError: insecure pickle when shred is not
+            # installed there.
             r = 1
 
         if r != 0:
@@ -328,7 +337,10 @@ class VaultEditor:
         check_prereqs()
 
         ciphertext = self.read_data(filename)
-        plaintext = self.vault.decrypt(ciphertext)
+        try:
+            plaintext = self.vault.decrypt(ciphertext)
+        except AnsibleError as e:
+            raise AnsibleError("%s for %s" % (to_bytes(e),to_bytes(filename)))
         self.write_data(plaintext, output_file or filename, shred=False)
 
     def create_file(self, filename):
@@ -348,7 +360,10 @@ class VaultEditor:
         check_prereqs()
 
         ciphertext = self.read_data(filename)
-        plaintext = self.vault.decrypt(ciphertext)
+        try:
+            plaintext = self.vault.decrypt(ciphertext)
+        except AnsibleError as e:
+            raise AnsibleError("%s for %s" % (to_bytes(e),to_bytes(filename)))
 
         if self.vault.cipher_name not in CIPHER_WRITE_WHITELIST:
             # we want to get rid of files encrypted with the AES cipher
@@ -359,9 +374,12 @@ class VaultEditor:
     def plaintext(self, filename):
 
         check_prereqs()
-
         ciphertext = self.read_data(filename)
-        plaintext = self.vault.decrypt(ciphertext)
+
+        try:
+            plaintext = self.vault.decrypt(ciphertext)
+        except AnsibleError as e:
+            raise AnsibleError("%s for %s" % (to_bytes(e),to_bytes(filename)))
 
         return plaintext
 
@@ -371,7 +389,10 @@ class VaultEditor:
 
         prev = os.stat(filename)
         ciphertext = self.read_data(filename)
-        plaintext = self.vault.decrypt(ciphertext)
+        try:
+            plaintext = self.vault.decrypt(ciphertext)
+        except AnsibleError as e:
+            raise AnsibleError("%s for %s" % (to_bytes(e),to_bytes(filename)))
 
         new_vault = VaultLib(new_password)
         new_ciphertext = new_vault.encrypt(plaintext)
@@ -383,6 +404,7 @@ class VaultEditor:
         os.chown(filename, prev.st_uid, prev.st_gid)
 
     def read_data(self, filename):
+
         try:
             if filename == '-':
                 data = sys.stdin.read()
@@ -428,7 +450,7 @@ class VaultEditor:
             os.chown(dest, prev.st_uid, prev.st_gid)
 
     def _editor_shell_command(self, filename):
-        EDITOR = os.environ.get('EDITOR','vim')
+        EDITOR = os.environ.get('EDITOR','vi')
         editor = shlex.split(EDITOR)
         editor.append(filename)
 
@@ -471,7 +493,7 @@ class VaultFile(object):
             this_vault = VaultLib(self.password)
             dec_data = this_vault.decrypt(tmpdata)
             if dec_data is None:
-                raise AnsibleError("Decryption failed")
+                raise AnsibleError("Failed to decrypt: %s" % self.filename)
             else:
                 self.tmpfile.write(dec_data)
                 return self.tmpfile

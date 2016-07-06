@@ -29,6 +29,7 @@ from ansible.playbook.task import Task
 from ansible.plugins import action_loader
 from ansible.plugins.strategy import StrategyBase
 from ansible.template import Templar
+from ansible.utils.unicode import to_unicode
 
 try:
     from __main__ import display
@@ -54,8 +55,7 @@ class StrategyModule(StrategyBase):
         host_tasks = {}
         display.debug("building list of next tasks for hosts")
         for host in hosts:
-            if not iterator.is_failed(host):
-                host_tasks[host.name] = iterator.get_next_task_for_host(host, peek=True)
+            host_tasks[host.name] = iterator.get_next_task_for_host(host, peek=True)
         display.debug("done building task lists")
 
         num_setups = 0
@@ -92,7 +92,7 @@ class StrategyModule(StrategyBase):
                 num_rescue += 1
             elif s.run_state == PlayIterator.ITERATING_ALWAYS:
                 num_always += 1
-        display.debug("done counting tasks in each state of execution")
+        display.debug("done counting tasks in each state of execution:\n\tnum_setups: %s\n\tnum_tasks: %s\n\tnum_rescue: %s\n\tnum_always: %s" % (num_setups, num_tasks, num_rescue, num_always))
 
         def _advance_selected_hosts(hosts, cur_block, cur_state):
             '''
@@ -191,9 +191,6 @@ class StrategyModule(StrategyBase):
                     run_once = False
                     work_to_do = True
 
-                    if task.any_errors_fatal:
-                        any_errors_fatal = True
-
                     # test to see if the task across all hosts points to an action plugin which
                     # sets BYPASS_HOST_LOOP to true, or if it has run_once enabled. If so, we
                     # will only send this task to the first host in the list.
@@ -203,7 +200,7 @@ class StrategyModule(StrategyBase):
                     except KeyError:
                         # we don't care here, because the action may simply not have a
                         # corresponding action plugin
-                        pass
+                        action = None
 
                     # check to see if this task should be skipped, due to it being a member of a
                     # role which has already run (and whether that role allows duplicate execution)
@@ -231,7 +228,10 @@ class StrategyModule(StrategyBase):
                         templar = Templar(loader=self._loader, variables=task_vars)
                         display.debug("done getting variables")
 
-                        run_once = templar.template(task.run_once)
+                        run_once = templar.template(task.run_once) or action and getattr(action, 'BYPASS_HOST_LOOP', False)
+
+                        if (task.any_errors_fatal or run_once) and not task.ignore_errors:
+                            any_errors_fatal = True
 
                         if not callback_sent:
                             display.debug("sending task start callback, copying the task so we can template it temporarily")
@@ -255,7 +255,7 @@ class StrategyModule(StrategyBase):
                         self._queue_task(host, task, task_vars, play_context)
 
                     # if we're bypassing the host loop, break out now
-                    if run_once or getattr(action, 'BYPASS_HOST_LOOP', False):
+                    if run_once:
                         break
 
                     results += self._process_pending_results(iterator, one_pass=True)
@@ -271,7 +271,7 @@ class StrategyModule(StrategyBase):
                 if not work_to_do and len(iterator.get_failed_hosts()) > 0:
                     display.debug("out of hosts to run on")
                     self._tqm.send_callback('v2_playbook_on_no_hosts_remaining')
-                    result = False
+                    result = self._tqm.RUN_ERROR
                     break
 
                 try:
@@ -284,7 +284,7 @@ class StrategyModule(StrategyBase):
                         variable_manager=self._variable_manager
                     )
                 except AnsibleError as e:
-                    return False
+                    return self._tqm.RUN_ERROR
 
                 include_failure = False
                 if len(included_files) > 0:
@@ -331,7 +331,7 @@ class StrategyModule(StrategyBase):
                             for host in included_file._hosts:
                                 self._tqm._failed_hosts[host.name] = True
                                 iterator.mark_host_failed(host)
-                            display.error(e, wrap_text=False)
+                            display.error(to_unicode(e), wrap_text=False)
                             include_failure = True
                             continue
 
@@ -350,23 +350,40 @@ class StrategyModule(StrategyBase):
                 display.debug("checking for any_errors_fatal")
                 failed_hosts = []
                 for res in results:
-                    if res.is_failed() or res.is_unreachable():
+                    if res.is_failed():
                         failed_hosts.append(res._host.name)
 
                 # if any_errors_fatal and we had an error, mark all hosts as failed
-                if any_errors_fatal and len(failed_hosts) > 0:
+                if any_errors_fatal and (len(failed_hosts) > 0 or len(self._tqm._unreachable_hosts.keys()) > 0):
                     for host in hosts_left:
                         # don't double-mark hosts, or the iterator will potentially
                         # fail them out of the rescue/always states
                         if host.name not in failed_hosts:
                             self._tqm._failed_hosts[host.name] = True
                             iterator.mark_host_failed(host)
+                    self._tqm.send_callback('v2_playbook_on_no_hosts_remaining')
+                    return self._tqm.RUN_FAILED_BREAK_PLAY
                 display.debug("done checking for any_errors_fatal")
+
+                display.debug("checking for max_fail_percentage")
+                if iterator._play.max_fail_percentage is not None and len(results) > 0:
+                    percentage = iterator._play.max_fail_percentage / 100.0
+
+                    if (len(self._tqm._failed_hosts) / len(results)) > percentage:
+                        for host in hosts_left:
+                            # don't double-mark hosts, or the iterator will potentially
+                            # fail them out of the rescue/always states
+                            if host.name not in failed_hosts:
+                                self._tqm._failed_hosts[host.name] = True
+                                iterator.mark_host_failed(host)
+                        self._tqm.send_callback('v2_playbook_on_no_hosts_remaining')
+                        return self._tqm.RUN_FAILED_BREAK_PLAY
+                display.debug("done checking for max_fail_percentage")
 
             except (IOError, EOFError) as e:
                 display.debug("got IOError/EOFError in task loop: %s" % e)
                 # most likely an abort, return failed
-                return False
+                return self._tqm.RUN_UNKNOWN_ERROR
 
         # run the base class run() method, which executes the cleanup function
         # and runs any outstanding handlers which have been triggered

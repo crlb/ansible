@@ -21,20 +21,22 @@ __metaclass__ = type
 
 from ansible.compat.six import iteritems, string_types
 
-from ansible.errors import AnsibleError
+from ansible.errors import AnsibleError, AnsibleParserError
 
 from ansible.parsing.mod_args import ModuleArgsParser
 from ansible.parsing.yaml.objects import AnsibleBaseYAMLObject, AnsibleMapping, AnsibleUnicode
 
 from ansible.plugins import lookup_loader
-
 from ansible.playbook.attribute import FieldAttribute
 from ansible.playbook.base import Base
 from ansible.playbook.become import Become
 from ansible.playbook.block import Block
 from ansible.playbook.conditional import Conditional
+from ansible.playbook.loop_control import LoopControl
 from ansible.playbook.role import Role
 from ansible.playbook.taggable import Taggable
+
+from ansible.utils.unicode import to_str
 
 try:
     from __main__ import display
@@ -69,20 +71,21 @@ class Task(Base, Conditional, Taggable, Become):
 
     _any_errors_fatal     = FieldAttribute(isa='bool')
     _async                = FieldAttribute(isa='int', default=0)
-    _changed_when         = FieldAttribute(isa='string')
+    _changed_when         = FieldAttribute(isa='list', default=[])
     _delay                = FieldAttribute(isa='int', default=5)
     _delegate_to          = FieldAttribute(isa='string')
     _delegate_facts       = FieldAttribute(isa='bool', default=False)
-    _failed_when          = FieldAttribute(isa='string')
+    _failed_when          = FieldAttribute(isa='list', default=[])
     _first_available_file = FieldAttribute(isa='list')
     _loop                 = FieldAttribute(isa='string', private=True)
     _loop_args            = FieldAttribute(isa='list', private=True)
+    _loop_control         = FieldAttribute(isa='class', class_type=LoopControl)
     _name                 = FieldAttribute(isa='string', default='')
     _notify               = FieldAttribute(isa='list')
     _poll                 = FieldAttribute(isa='int')
     _register             = FieldAttribute(isa='string')
-    _retries              = FieldAttribute(isa='int', default=3)
-    _until                = FieldAttribute(isa='string')
+    _retries              = FieldAttribute(isa='int')
+    _until                = FieldAttribute(isa='list', default=[])
 
     def __init__(self, block=None, role=None, task_include=None):
         ''' constructors a task, without the Task.load classmethod, it will be pretty blank '''
@@ -102,7 +105,7 @@ class Task(Base, Conditional, Taggable, Become):
     def get_name(self):
         ''' return the name of the task '''
 
-        if self._role and self.name:
+        if self._role and self.name and ("%s : " % self._role._role_name) not in self.name:
             return "%s : %s" % (self._role.get_name(), self.name)
         elif self.name:
             return self.name
@@ -133,7 +136,7 @@ class Task(Base, Conditional, Taggable, Become):
 
     def __repr__(self):
         ''' returns a human readable representation of the task '''
-        if self.get_name() == 'meta ':
+        if self.get_name() == 'meta':
             return "TASK: meta (%s)" % self.args['_raw_params']
         else:
             return "TASK: %s" % self.get_name()
@@ -168,7 +171,10 @@ class Task(Base, Conditional, Taggable, Become):
         # and the delegate_to value from the various possible forms
         # supported as legacy
         args_parser = ModuleArgsParser(task_ds=ds)
-        (action, args, delegate_to) = args_parser.parse()
+        try:
+            (action, args, delegate_to) = args_parser.parse()
+        except AnsibleParserError as e:
+            raise AnsibleParserError(to_str(e), obj=ds)
 
         # the command/shell/script modules used to support the `cmd` arg,
         # which corresponds to what we now call _raw_params, so move that
@@ -190,7 +196,7 @@ class Task(Base, Conditional, Taggable, Become):
         if 'vars' in ds:
             # _load_vars is defined in Base, and is used to load a dictionary
             # or list of dictionaries in a standard way
-            new_ds['vars'] = self._load_vars(None, ds.pop('vars'))
+            new_ds['vars'] = self._load_vars(None, ds.get('vars'))
         else:
             new_ds['vars'] = dict()
 
@@ -215,6 +221,16 @@ class Task(Base, Conditional, Taggable, Become):
                     new_ds[k] = v
 
         return super(Task, self).preprocess_data(new_ds)
+
+    def _load_loop_control(self, attr, ds):
+        if not isinstance(ds, dict):
+           raise AnsibleParserError(
+               "the `loop_control` value must be specified as a dictionary and cannot " \
+               "be a variable itself (though it can contain variables)",
+               obj=ds,
+           )
+
+        return LoopControl.load(data=ds, variable_manager=self._variable_manager, loader=self._loader)
 
     def post_validate(self, templar):
         '''
@@ -244,11 +260,21 @@ class Task(Base, Conditional, Taggable, Become):
         if value is None:
             return dict()
 
-        for env_item in value:
-            if isinstance(env_item, (string_types, AnsibleUnicode)) and env_item in templar._available_variables.keys():
-                display.deprecated("Using bare variables for environment is deprecated."
-                        " Update your playbooks so that the environment value uses the full variable syntax ('{{foo}}')")
-                break
+        elif isinstance(value, list):
+            if  len(value) == 1:
+                return templar.template(value[0], convert_bare=True)
+            else:
+                env = []
+                for env_item in value:
+                    if isinstance(env_item, (string_types, AnsibleUnicode)) and env_item in templar._available_variables.keys():
+                        env[env_item] =  templar.template(env_item, convert_bare=True)
+        elif isinstance(value, dict):
+            env = dict()
+            for env_item in value:
+                if isinstance(env_item, (string_types, AnsibleUnicode)) and env_item in templar._available_variables.keys():
+                    env[env_item] =  templar.template(value[env_item], convert_bare=True)
+
+        # at this point it should be a simple string
         return templar.template(value, convert_bare=True)
 
     def _post_validate_changed_when(self, attr, value, templar):
