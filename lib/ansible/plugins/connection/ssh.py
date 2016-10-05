@@ -176,6 +176,9 @@ class Connection(ConnectionBase):
                     "ANSIBLE_REMOTE_PORT/remote_port/ansible_port set",
                     ("-o", "Port={0}".format(self._play_context.port))
                 )
+            else:
+              display.warning('SSH unable to connect to %s:%d, reverting to default port' % (self.host, self._play_context.port))
+
 
         key = self._play_context.private_key_file
         if key:
