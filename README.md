@@ -62,7 +62,8 @@ In a multi-host environment, this method is unreliable because it tests a single
 ---
 # file: demo.yaml
 # The non-standard ssh ports are specified in the host inventory and could be different for each
-# host; see "sample_ssh_port_setting" directory on the "stable-1.9" and "stable-2.0.0.1" branches.
+# host; see "sample_ssh_port_setting" directory on the "stable-1.9","stable-2.0.0.1", and 
+# stable-2.1 branches.
 
 - hosts: all
   roles:
