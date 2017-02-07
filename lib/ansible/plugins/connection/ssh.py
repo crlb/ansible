@@ -25,6 +25,7 @@ import os
 import pipes
 import pty
 import select
+import socket
 import subprocess
 import time
 
@@ -180,8 +181,15 @@ class Connection(ConnectionBase):
             self._add_args(b_command, b_args, u"ANSIBLE_HOST_KEY_CHECKING/host_key_checking disabled")
 
         if self._play_context.port is not None:
-            b_args = (b"-o", b"Port=" + to_bytes(self._play_context.port, nonstring='simplerepr', errors='surrogate_or_strict'))
-            self._add_args(b_command, b_args, u"ANSIBLE_REMOTE_PORT/remote_port/ansible_port set")
+            test_port_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_port_result = test_port_socket.connect_ex( (self.host, self._play_context.port) )
+            test_port_socket.close()
+
+            if test_port_result == 0:
+                b_args = (b"-o", b"Port=" + to_bytes(self._play_context.port, nonstring='simplerepr', errors='surrogate_or_strict'))
+                self._add_args(b_command, b_args, u"ANSIBLE_REMOTE_PORT/remote_port/ansible_port set")
+            else:
+                display.warning('SSH unable to connect to %s:%d, reverting to default port' % (self.host, self._play_context.port))
 
         key = self._play_context.private_key_file
         if key:
