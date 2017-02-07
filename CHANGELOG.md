@@ -1,10 +1,41 @@
 Ansible Changes By Release
 ==========================
 
-## 2.2 "The Battle of Evermore" - ACTIVE DEVELOPMENT
+## 2.2.1 "The Battle of Evermore" - 01-16-2017
+
+### Major Changes:
+
+* Security fix for CVE-2016-9587 - An attacker with control over a client system being managed by Ansible and the ability to send facts back to the Ansible server could use this flaw to execute arbitrary code on the Ansible server as the user and group Ansible is running as.
+
+### Minor Changes:
+
+* Fixes a bug where undefined variables in with_* loops would cause a task failure even if the when condition would cause the task to be skipped.
+* Fixed a bug related to roles where in certain situations a role may be run more than once despite not allowing duplicates.
+* Fixed some additional bugs related to atomic_move for modules.
+* Fixes multiple bugs related to field/attribute inheritance in nested blocks and includes, as well as task iteration logic during failures.
+* Fixed pip installing packages into virtualenvs using the system pip instead of the virtualenv pip.
+* Fixed dnf on systems with dnf-2.0.x (some changes in the API).
+* Fixed traceback with dnf install of groups.
+* Fixes a bug in which include_vars was not working with failed_when.
+* Fix for include_vars only loading files with .yml, .yaml, and .json extensions.  This was only supposed to apply to loading a directory of vars files.
+* Fixes several bugs related to properly incrementing the failed count in the host statistics.
+* Fixes a bug with listening handlers which did not specify a `name` field.
+* Fixes a bug with the `play_hosts` internal variable, so that it properly reflects the current list of hosts.
+* Fixes a bug related to the v2_playbook_on_start callback method and legacy (v1) plugins.
+* Fixes an openssh related process exit race condition, related to the fact that connections using ControlPersist do not close stderr.
+* Improvements and fixes to OpenBSD fact gathering.
+* Updated `make deb` to use pbuilder. Use `make local_deb` for the previous non-pbuilder build.
+* Fixed Windows async to avoid blocking due to handle inheritance.
+* Fixed bugs in the mount module on older Linux kernels and *BSDs
+* Various minor fixes for Python 3
+* Inserted some checks for jinja2-2.9, which can cause some issues with Ansible currently.
+
+## 2.2 "The Battle of Evermore" - 11-01-2016
 
 ###Major Changes:
 
+* Security fix for CVE-2016-8628 - Command injection by compromised server via fact variables. In some situations, facts returned by modules could overwrite connection-based facts or some other special variables, leading to injected commands running on the Ansible controller as the user running Ansible (or via escalated permissions).
+* Security fix for CVE-2016-8614 - apt_key module not properly validating keys in some situations.
 * Added the `listen` feature for modules. This feature allows tasks to more easily notify multiple handlers, as well as making it easier for handlers from decoupled roles to be notified.
 * Major performance improvements.
 * Added support for binary modules
@@ -33,16 +64,15 @@ Ansible Changes By Release
 * Tech Preview: Work has been done to get Ansible running under Python3.  This work is not complete enough to depend upon in production environments but it is enough to begin testing it.
   * Most of the controller side should now work.  Users should be able to run python3 /usr/bin/ansible and python3 /usr/bin/ansible-playbook and have core features of ansible work.
   * A few of the most essential modules have been audited and are known to work.  Others work out of the box.
-  * We are using unit and integration tests to help us port code and not regress later.  Even if you are not famiriar with python you can still help by contributing integration tests (just ansible roles) that exercise more of the code to make sure it continues to run on both Python2 and Python3.
+  * We are using unit and integration tests to help us port code and not regress later.  Even if you are not familiar with python you can still help by contributing integration tests (just ansible roles) that exercise more of the code to make sure it continues to run on both Python2 and Python3.
   * scp_if_ssh now supports True, False and "smart". "smart" is the default and will retry failed sftp transfers with scp.
 * Network:
-  * Refactored all network modules to remove dulicate code and take advantage of Ansiballz implementation
+  * Refactored all network modules to remove duplicate code and take advantage of Ansiballz implementation
   * All functionality from *_template network modules have been combined into *_config module
   * Network *_command modules not longer allow configuration mode statements
 
 ####New Modules:
 - apache2_mod_proxy
-- archive
 - asa
   * asa_acl
   * asa_command
@@ -283,6 +313,13 @@ Ansible Changes By Release
 * Fix a problem with the pip module updating the python pip package itself.
 * ansible_play_hosts is a new magic variable to provide a list of hosts in scope for the current play. Unlike play_hosts it is not subject to the 'serial' keyword.
 * ansible_play_batch is a new magic variable meant to substitute the current play_hosts.
+* The subversion module from core now marks its password parameter as no_log so
+  the password is obscured when logging.
+* The postgresql_lang and postgresql_ext modules from extras now mark
+  login_password as no_log so the password is obscured when logging.
+* Fix for yum module incorrectly thinking it succeeded in installing packages
+* Make the default ansible_managed template string into a static string since
+  all of the replacable values lead to non-idempotent behaviour.
 
 ###For custom front ends using the API:
 * ansible.parsing.vault:
@@ -292,7 +329,7 @@ Ansible Changes By Release
     Ansible.  The feature it was intended to support has now been implemented
     without using this.
   * VaultAES, the older, insecure encrypted format that debuted in Ansible-1.5
-    and was relaced by VaultAES256 less than a week later, now has a deprecation
+    and was replaced by VaultAES256 less than a week later, now has a deprecation
     warning.  **It will be removed in 2.3**.  In the unlikely event that you
     wrote a vault file in that 1 week window and have never modified the file
     since (ansible-vault automatically re-encrypts the file using VaultAES256

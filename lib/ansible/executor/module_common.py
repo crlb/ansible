@@ -22,6 +22,7 @@ __metaclass__ = type
 
 import ast
 import base64
+import datetime
 import imp
 import json
 import os
@@ -106,10 +107,21 @@ import __main__
 # Ubuntu15.10 with python2.7  Works
 # Ubuntu15.10 with python3.4  Fails without this
 # Ubuntu16.04.1 with python3.5  Fails without this
+# To test on another platform:
+# * use the copy module (since this shadows the stdlib copy module)
+# * Turn off pipelining
+# * Make sure that the destination file does not exist
+# * ansible ubuntu16-test -m copy -a 'src=/etc/motd dest=/var/tmp/m'
+# This will traceback in shutil.  Looking at the complete traceback will show
+# that shutil is importing copy which finds the ansible module instead of the
+# stdlib module
 scriptdir = None
 try:
     scriptdir = os.path.dirname(os.path.abspath(__main__.__file__))
-except AttributeError:
+except (AttributeError, OSError):
+    # Some platforms don't set __file__ when reading from stdin
+    # OSX raises OSError if using abspath() in a directory we don't have
+    # permission to read.
     pass
 if scriptdir is not None:
     sys.path = [p for p in sys.path if p != scriptdir]
@@ -317,7 +329,12 @@ if __name__ == '__main__':
             # py3: zipped_mod will be text, py2: it's bytes.  Need bytes at the end
             sitecustomize = u'import sys\\nsys.path.insert(0,"%%s")\\n' %%  zipped_mod
             sitecustomize = sitecustomize.encode('utf-8')
-            z.writestr('sitecustomize.py', sitecustomize)
+            # Use a ZipInfo to work around zipfile limitation on hosts with
+            # clocks set to a pre-1980 year (for instance, Raspberry Pi)
+            zinfo = zipfile.ZipInfo()
+            zinfo.filename = 'sitecustomize.py'
+            zinfo.date_time = ( %(year)i, %(month)i, %(day)i, %(hour)i, %(minute)i, %(second)i)
+            z.writestr(zinfo, sitecustomize)
             z.close()
 
             exitcode = invoke_module(module, zipped_mod, ANSIBALLZ_PARAMS)
@@ -680,6 +697,7 @@ def _find_snippet_imports(module_name, module_data, module_path, module_args, ta
         interpreter_parts = interpreter.split(u' ')
         interpreter = u"'{0}'".format(u"', '".join(interpreter_parts))
 
+        now=datetime.datetime.utcnow()
         output.write(to_bytes(ACTIVE_ANSIBALLZ_TEMPLATE % dict(
             zipdata=zipdata,
             ansible_module=module_name,
@@ -687,6 +705,12 @@ def _find_snippet_imports(module_name, module_data, module_path, module_args, ta
             shebang=shebang,
             interpreter=interpreter,
             coding=ENCODING_STRING,
+            year=now.year,
+            month=now.month,
+            day=now.day,
+            hour=now.hour,
+            minute=now.minute,
+            second=now.second,
         )))
         module_data = output.getvalue()
 

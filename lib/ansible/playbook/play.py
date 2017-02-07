@@ -96,6 +96,7 @@ class Play(Base, Taggable, Become):
         super(Play, self).__init__()
 
         self._included_path = None
+        self._removed_hosts = []
         self.ROLE_CACHE = {}
 
     def __repr__(self):
@@ -202,7 +203,7 @@ class Play(Base, Taggable, Become):
         for prompt_data in new_ds:
             if 'name' not in prompt_data:
                 display.deprecated("Using the 'short form' for vars_prompt has been deprecated")
-                for vname, prompt in prompt_data.iteritems():
+                for vname, prompt in prompt_data.items():
                     vars_prompts.append(dict(
                         name      = vname,
                         prompt    = prompt,

@@ -157,33 +157,37 @@ class CLI(object):
 
 
     @staticmethod
-    def ask_vault_passwords(ask_new_vault_pass=False, rekey=False):
+    def ask_vault_passwords():
         ''' prompt for vault password and/or password change '''
 
         vault_pass = None
-        new_vault_pass = None
         try:
-            if rekey or not ask_new_vault_pass:
-                vault_pass = getpass.getpass(prompt="Vault password: ")
+            vault_pass = getpass.getpass(prompt="Vault password: ")
 
-            if ask_new_vault_pass:
-                new_vault_pass = getpass.getpass(prompt="New Vault password: ")
-                new_vault_pass2 = getpass.getpass(prompt="Confirm New Vault password: ")
-                if new_vault_pass != new_vault_pass2:
-                    raise AnsibleError("Passwords do not match")
         except EOFError:
             pass
 
         # enforce no newline chars at the end of passwords
         if vault_pass:
-            vault_pass = to_bytes(vault_pass, errors='strict', nonstring='simplerepr').strip()
+            vault_pass = to_text(vault_pass, errors='surrogate_or_strict', nonstring='simplerepr').strip()
+
+        return vault_pass
+
+    @staticmethod
+    def ask_new_vault_passwords():
+        new_vault_pass = None
+        try:
+            new_vault_pass = getpass.getpass(prompt="New Vault password: ")
+            new_vault_pass2 = getpass.getpass(prompt="Confirm New Vault password: ")
+            if new_vault_pass != new_vault_pass2:
+                raise AnsibleError("Passwords do not match")
+        except EOFError:
+            pass
+
         if new_vault_pass:
-            new_vault_pass = to_bytes(new_vault_pass, errors='strict', nonstring='simplerepr').strip()
+            new_vault_pass = to_text(new_vault_pass, errors='surrogate_or_strict', nonstring='simplerepr').strip()
 
-        if ask_new_vault_pass and not rekey:
-            vault_pass = new_vault_pass
-
-        return vault_pass, new_vault_pass
+        return new_vault_pass
 
     def ask_passwords(self):
         ''' prompt for connection and become passwords if needed '''
@@ -573,7 +577,7 @@ class CLI(object):
             stdout, stderr = p.communicate()
             if p.returncode != 0:
                 raise AnsibleError("Vault password script %s returned non-zero (%s): %s" % (this_path, p.returncode, p.stderr))
-            vault_pass = stdout.strip('\r\n')
+            vault_pass = stdout.strip(b'\r\n')
         else:
             try:
                 f = open(this_path, "rb")
@@ -582,7 +586,7 @@ class CLI(object):
             except (OSError, IOError) as e:
                 raise AnsibleError("Could not read vault password file %s: %s" % (this_path, e))
 
-        return vault_pass
+        return to_text(vault_pass, errors='surrogate_or_strict')
 
     def get_opt(self, k, defval=""):
         """

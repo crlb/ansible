@@ -110,7 +110,7 @@ class PlaybookCLI(CLI):
             vault_pass = CLI.read_vault_password_file(self.options.vault_password_file, loader=loader)
             loader.set_vault_password(vault_pass)
         elif self.options.ask_vault_pass:
-            vault_pass = self.ask_vault_passwords()[0]
+            vault_pass = self.ask_vault_passwords()
             loader.set_vault_password(vault_pass)
 
         # initial error check, to make sure all specified playbooks are accessible
@@ -163,6 +163,12 @@ class PlaybookCLI(CLI):
 
                 display.display('\nplaybook: %s' % p['playbook'])
                 for idx, play in enumerate(p['plays']):
+                    if play._included_path is not None:
+                        loader.set_basedir(play._included_path)
+                    else:
+                        pb_dir = os.path.realpath(os.path.dirname(p['playbook']))
+                        loader.set_basedir(pb_dir)
+
                     msg = "\n  play #%d (%s): %s" % (idx + 1, ','.join(play.hosts), play.name)
                     mytags = set(play.tags)
                     msg += '\tTAGS: [%s]' % (','.join(mytags))

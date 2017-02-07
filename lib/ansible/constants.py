@@ -146,7 +146,7 @@ DEFAULT_COW_WHITELIST = ['bud-frogs', 'bunny', 'cheese', 'daemon', 'default', 'd
 DEFAULTS='defaults'
 
 # FIXME: add deprecation warning when these get set
-#### DEPRECATED VARS #### 
+#### DEPRECATED VARS ####
 # use more sanely named 'inventory'
 DEPRECATED_HOST_LIST  = get_config(p, DEFAULTS, 'hostfile', 'ANSIBLE_HOSTS', '/etc/ansible/hosts', ispath=True)
 # this is not used since 0.5 but people might still have in config
@@ -157,8 +157,8 @@ DEFAULT_DEBUG             = get_config(p, DEFAULTS, 'debug',            'ANSIBLE
 DEFAULT_HOST_LIST         = get_config(p, DEFAULTS,'inventory', 'ANSIBLE_INVENTORY', DEPRECATED_HOST_LIST, ispath=True)
 DEFAULT_MODULE_PATH       = get_config(p, DEFAULTS, 'library',          'ANSIBLE_LIBRARY',          None, ispathlist=True)
 DEFAULT_ROLES_PATH        = get_config(p, DEFAULTS, 'roles_path',       'ANSIBLE_ROLES_PATH',       '/etc/ansible/roles', ispathlist=True, expand_relative_paths=True)
-DEFAULT_REMOTE_TMP        = get_config(p, DEFAULTS, 'remote_tmp',       'ANSIBLE_REMOTE_TEMP',      '$HOME/.ansible/tmp')
-DEFAULT_LOCAL_TMP         = get_config(p, DEFAULTS, 'local_tmp',        'ANSIBLE_LOCAL_TEMP',      '$HOME/.ansible/tmp', istmppath=True)
+DEFAULT_REMOTE_TMP        = get_config(p, DEFAULTS, 'remote_tmp',       'ANSIBLE_REMOTE_TEMP',      '~/.ansible/tmp')
+DEFAULT_LOCAL_TMP         = get_config(p, DEFAULTS, 'local_tmp',        'ANSIBLE_LOCAL_TEMP',      '~/.ansible/tmp', istmppath=True)
 DEFAULT_MODULE_NAME       = get_config(p, DEFAULTS, 'module_name',      None,                       'command')
 DEFAULT_FORKS             = get_config(p, DEFAULTS, 'forks',            'ANSIBLE_FORKS',            5, integer=True)
 DEFAULT_MODULE_ARGS       = get_config(p, DEFAULTS, 'module_args',      'ANSIBLE_MODULE_ARGS',      '')
@@ -176,7 +176,7 @@ DEFAULT_VAULT_PASSWORD_FILE = get_config(p, DEFAULTS, 'vault_password_file', 'AN
 DEFAULT_TRANSPORT         = get_config(p, DEFAULTS, 'transport',        'ANSIBLE_TRANSPORT',        'smart')
 DEFAULT_SCP_IF_SSH        = get_config(p, 'ssh_connection', 'scp_if_ssh',       'ANSIBLE_SCP_IF_SSH',       'smart')
 DEFAULT_SFTP_BATCH_MODE   = get_config(p, 'ssh_connection', 'sftp_batch_mode', 'ANSIBLE_SFTP_BATCH_MODE', True, boolean=True)
-DEFAULT_MANAGED_STR       = get_config(p, DEFAULTS, 'ansible_managed',  None,           'Ansible managed: {file} modified on %Y-%m-%d %H:%M:%S by {uid} on {host}')
+DEFAULT_MANAGED_STR       = get_config(p, DEFAULTS, 'ansible_managed',  None,           'Ansible managed')
 DEFAULT_SYSLOG_FACILITY   = get_config(p, DEFAULTS, 'syslog_facility',  'ANSIBLE_SYSLOG_FACILITY', 'LOG_USER')
 DEFAULT_KEEP_REMOTE_FILES = get_config(p, DEFAULTS, 'keep_remote_files', 'ANSIBLE_KEEP_REMOTE_FILES', False, boolean=True)
 DEFAULT_HASH_BEHAVIOUR    = get_config(p, DEFAULTS, 'hash_behaviour', 'ANSIBLE_HASH_BEHAVIOUR', 'replace')
@@ -190,6 +190,8 @@ DEFAULT_LOG_PATH          = get_config(p, DEFAULTS, 'log_path',           'ANSIB
 DEFAULT_FORCE_HANDLERS    = get_config(p, DEFAULTS, 'force_handlers', 'ANSIBLE_FORCE_HANDLERS', False, boolean=True)
 DEFAULT_INVENTORY_IGNORE  = get_config(p, DEFAULTS, 'inventory_ignore_extensions', 'ANSIBLE_INVENTORY_IGNORE', ["~", ".orig", ".bak", ".ini", ".cfg", ".retry", ".pyc", ".pyo"], islist=True)
 DEFAULT_VAR_COMPRESSION_LEVEL = get_config(p, DEFAULTS, 'var_compression_level', 'ANSIBLE_VAR_COMPRESSION_LEVEL', 0, integer=True)
+DEFAULT_INTERNAL_POLL_INTERVAL = get_config(p, DEFAULTS, 'internal_poll_interval', None, 0.001, floating=True)
+ERROR_ON_MISSING_HANDLER  = get_config(p, DEFAULTS, 'error_on_missing_handler', 'ANSIBLE_ERROR_ON_MISSING_HANDLER', True, boolean=True)
 
 # static includes
 DEFAULT_TASK_INCLUDES_STATIC    = get_config(p, DEFAULTS, 'task_includes_static', 'ANSIBLE_TASK_INCLUDES_STATIC', False, boolean=True)

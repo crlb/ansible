@@ -138,8 +138,7 @@
     - asyncresult | failed == true
     - asyncresult.msg is search('failing via exception')
 
-
-# this test is only flaky under shippable/AWS- the last iteration "until's" forever, cannot repro locally
+# FUTURE: figure out why the last iteration of this test often fails on shippable
 #- name: loop async success
 #  async_test:
 #    sleep_delay_sec: 3

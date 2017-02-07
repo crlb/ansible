@@ -38,6 +38,7 @@ from ansible.module_utils._text import to_bytes, to_text
 from ansible.parsing.utils.addresses import parse_address
 from ansible.plugins import vars_loader
 from ansible.utils.vars import combine_vars
+from ansible.utils.path import unfrackpath
 
 try:
     from __main__ import display
@@ -58,7 +59,7 @@ class Inventory(object):
 
         # the host file file, or script path, or list of hosts
         # if a list, inventory data will NOT be loaded
-        self.host_list = host_list
+        self.host_list = unfrackpath(host_list, follow=False)
         self._loader = loader
         self._variable_manager = variable_manager
         self.localhost = None
@@ -780,7 +781,10 @@ class Inventory(object):
         path = os.path.realpath(os.path.join(basedir, 'group_vars'))
         found_vars = set()
         if os.path.exists(path):
-            found_vars = set(os.listdir(to_text(path)))
+            if os.path.isdir(path):
+                found_vars = set(os.listdir(to_text(path)))
+            else:
+                display.warning("Found group_vars that is not a directory, skipping: %s" % path)
         return found_vars
 
     def _find_host_vars_files(self, basedir):

@@ -37,7 +37,7 @@ from datetime import datetime
 import uuid
 
 import yaml
-from jinja2.filters import environmentfilter
+from jinja2.filters import environmentfilter, do_groupby as _do_groupby
 
 try:
     import passlib.hash
@@ -67,7 +67,7 @@ class AnsibleJSONEncoder(json.JSONEncoder):
         if isinstance(o, HostVars):
             return dict(o)
         else:
-            return json.JSONEncoder.default(o)
+            return super(AnsibleJSONEncoder, self).default(o)
 
 def to_yaml(a, *args, **kw):
     '''Make verbose, human readable yaml'''
@@ -257,7 +257,11 @@ def get_encrypted_password(password, hashtype='sha512', salt=None):
             saltstring =  "$%s$%s" % (cryptmethod[hashtype],salt)
             encrypted = crypt.crypt(password, saltstring)
         else:
-            cls = getattr(passlib.hash, '%s_crypt' % hashtype)
+            if hashtype == 'blowfish':
+                cls = passlib.hash.bcrypt;
+            else:
+                cls = getattr(passlib.hash, '%s_crypt' % hashtype)
+
             encrypted = cls.encrypt(password, salt=salt)
 
         return encrypted
@@ -387,11 +391,75 @@ def extract(item, container, morekeys=None):
 
     return value
 
+def failed(*a, **kw):
+    ''' Test if task result yields failed '''
+    item = a[0]
+    if type(item) != dict:
+        raise errors.AnsibleFilterError("|failed expects a dictionary")
+    rc = item.get('rc',0)
+    failed = item.get('failed',False)
+    if rc != 0 or failed:
+        return True
+    else:
+        return False
+
+def success(*a, **kw):
+    ''' Test if task result yields success '''
+    return not failed(*a, **kw)
+
+def changed(*a, **kw):
+    ''' Test if task result yields changed '''
+    item = a[0]
+    if type(item) != dict:
+        raise errors.AnsibleFilterError("|changed expects a dictionary")
+    if not 'changed' in item:
+        changed = False
+        if ('results' in item    # some modules return a 'results' key
+                and type(item['results']) == list
+                and type(item['results'][0]) == dict):
+            for result in item['results']:
+                changed = changed or result.get('changed', False)
+    else:
+        changed = item.get('changed', False)
+    return changed
+
+def skipped(*a, **kw):
+    ''' Test if task result yields skipped '''
+    item = a[0]
+    if type(item) != dict:
+        raise errors.AnsibleFilterError("|skipped expects a dictionary")
+    skipped = item.get('skipped', False)
+    return skipped
+
+
+@environmentfilter
+def do_groupby(environment, value, attribute):
+    """Overridden groupby filter for jinja2, to address an issue with
+    jinja2>=2.9.0,<2.9.5 where a namedtuple was returned which
+    has repr that prevents ansible.template.safe_eval.safe_eval from being
+    able to parse and eval the data.
+
+    jinja2<2.9.0,>=2.9.5 is not affected, as <2.9.0 uses a tuple, and
+    >=2.9.5 uses a standard tuple repr on the namedtuple.
+
+    The adaptation here, is to run the jinja2 `do_groupby` function, and
+    cast all of the namedtuples to a regular tuple.
+
+    See https://github.com/ansible/ansible/issues/20098
+
+    We may be able to remove this in the future.
+    """
+    return [tuple(t) for t in _do_groupby(environment, value, attribute)]
+
+
 class FilterModule(object):
     ''' Ansible core jinja2 filters '''
 
     def filters(self):
         return {
+            # jinja2 overrides
+            'groupby': do_groupby,
+
             # base 64
             'b64decode': partial(unicode_wrap, base64.b64decode),
             'b64encode': partial(unicode_wrap, base64.b64encode),
@@ -467,4 +535,18 @@ class FilterModule(object):
 
             # array and dict lookups
             'extract': extract,
+
+            # failure testing
+            'failed'    : failed,
+            'failure'   : failed,
+            'success'   : success,
+            'succeeded' : success,
+
+            # changed testing
+            'changed' : changed,
+            'change'  : changed,
+
+            # skip testing
+            'skipped' : skipped,
+            'skip'    : skipped,
         }

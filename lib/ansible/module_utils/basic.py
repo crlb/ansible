@@ -635,6 +635,7 @@ class AnsibleModule(object):
         see library/* for examples
         '''
 
+        self._name = os.path.basename(__file__) #initialize name until we can parse from options
         self.argument_spec = argument_spec
         self.supports_check_mode = supports_check_mode
         self.check_mode = False
@@ -714,7 +715,7 @@ class AnsibleModule(object):
 
         self._set_defaults(pre=False)
 
-        if not self.no_log and self._verbosity >= 3:
+        if not self.no_log:
             self._log_invocation()
 
         # finally, make sure we're in a sane working dir
@@ -1926,18 +1927,6 @@ class AnsibleModule(object):
         creating = not os.path.exists(b_dest)
 
         try:
-            login_name = os.getlogin()
-        except OSError:
-            # not having a tty can cause the above to fail, so
-            # just get the LOGNAME environment variable instead
-            login_name = os.environ.get('LOGNAME', None)
-
-        # if the original login_name doesn't match the currently
-        # logged-in user, or if the SUDO_USER environment variable
-        # is set, then this user has switched their credentials
-        switched_user = login_name and login_name != pwd.getpwuid(os.getuid())[0] or os.environ.get('SUDO_USER')
-
-        try:
             # Optimistically try a rename, solves some corner cases and can avoid useless work, throws exception if not atomic.
             os.rename(b_src, b_dest)
         except (IOError, OSError):
@@ -1960,19 +1949,28 @@ class AnsibleModule(object):
                 except (OSError, IOError):
                     e = get_exception()
                     self.fail_json(msg='The destination directory (%s) is not writable by the current user. Error was: %s' % (os.path.dirname(dest), e))
+                except TypeError:
+                    # We expect that this is happening because python3.4.x and
+                    # below can't handle byte strings in mkstemp().  Traceback
+                    # would end in something like:
+                    #     file = _os.path.join(dir, pre + name + suf)
+                    # TypeError: can't concat bytes to str
+                    self.fail_json(msg='Failed creating temp file for atomic move.  This usually happens when using Python3 less than Python3.5.  Please use Python2.x or Python3.5 or greater.', exception=sys.exc_info())
+
                 b_tmp_dest_name = to_bytes(tmp_dest_name, errors='surrogate_or_strict')
 
                 try:
                     try:
                         # close tmp file handle before file operations to prevent text file busy errors on vboxfs synced folders (windows host)
                         os.close(tmp_dest_fd)
-                        # leaves tmp file behind when sudo and  not root
-                        if switched_user and os.getuid() != 0:
+                        # leaves tmp file behind when sudo and not root
+                        try:
+                            shutil.move(b_src, b_tmp_dest_name)
+                        except OSError:
                             # cleanup will happen by 'rm' of tempdir
                             # copy2 will preserve some metadata
                             shutil.copy2(b_src, b_tmp_dest_name)
-                        else:
-                            shutil.move(b_src, b_tmp_dest_name)
+
                         if self.selinux_enabled():
                             self.set_context_if_different(
                                 b_tmp_dest_name, context, False)
@@ -1987,12 +1985,14 @@ class AnsibleModule(object):
                         try:
                             os.rename(b_tmp_dest_name, b_dest)
                         except (shutil.Error, OSError, IOError):
+                            e = get_exception()
                             if unsafe_writes:
-                                self._unsafe_writes(b_tmp_dest_name, b_dest, get_exception())
+                                self._unsafe_writes(b_tmp_dest_name, b_dest, e)
                             else:
-                                self.fail_json(msg='Could not replace file: %s to %s: %s' % (src, dest, exception))
+                                self.fail_json(msg='Could not replace file: %s to %s: %s' % (src, dest, e))
                     except (shutil.Error, OSError, IOError):
-                        self.fail_json(msg='Could not replace file: %s to %s: %s' % (src, dest, exception))
+                        e = get_exception()
+                        self.fail_json(msg='Could not replace file: %s to %s: %s' % (src, dest, e))
                 finally:
                     self.cleanup(b_tmp_dest_name)
 
@@ -2002,8 +2002,12 @@ class AnsibleModule(object):
             umask = os.umask(0)
             os.umask(umask)
             os.chmod(b_dest, DEFAULT_PERM & ~umask)
-            if switched_user:
-                os.chown(b_dest, os.getuid(), os.getgid())
+            try:
+                os.chown(b_dest, os.geteuid(), os.getegid())
+            except OSError:
+                # We're okay with trying our best here.  If the user is not
+                # root (or old Unices) they won't be able to chown.
+                pass
 
         if self.selinux_enabled():
             # rename might not preserve context
@@ -2187,14 +2191,13 @@ class AnsibleModule(object):
             stderr=subprocess.PIPE,
         )
 
-        if cwd and os.path.isdir(cwd):
-            kwargs['cwd'] = cwd
-
         # store the pwd
         prev_dir = os.getcwd()
 
         # make sure we're in the right working directory
         if cwd and os.path.isdir(cwd):
+            cwd = os.path.abspath(os.path.expanduser(cwd))
+            kwargs['cwd'] = cwd
             try:
                 os.chdir(cwd)
             except (OSError, IOError):
@@ -2206,7 +2209,6 @@ class AnsibleModule(object):
             old_umask = os.umask(umask)
 
         try:
-
             if self._debug:
                 self.log('Executing: ' + clean_args)
             cmd = subprocess.Popen(args, **kwargs)

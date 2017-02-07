@@ -49,12 +49,18 @@ class Block(Base, Become, Conditional, Taggable):
         self._use_handlers = use_handlers
         self._implicit     = implicit
 
+        # end of role flag
+        self._eor = False
+
         if task_include:
             self._parent = task_include
         elif parent_block:
             self._parent = parent_block
 
         super(Block, self).__init__()
+
+    def __repr__(self):
+        return "BLOCK(uuid=%s)(id=%s)(parent=%s)" % (self._uuid, id(self), self._parent)
 
     def get_vars(self):
         '''
@@ -175,6 +181,7 @@ class Block(Base, Become, Conditional, Taggable):
         new_me = super(Block, self).copy()
         new_me._play         = self._play
         new_me._use_handlers = self._use_handlers
+        new_me._eor          = self._eor
 
         if self._dep_chain is not None:
             new_me._dep_chain = self._dep_chain[:]
@@ -207,6 +214,7 @@ class Block(Base, Become, Conditional, Taggable):
                 data[attr] = getattr(self, attr)
 
         data['dep_chain'] = self.get_dep_chain()
+        data['eor'] = self._eor
 
         if self._role is not None:
             data['role'] = self._role.serialize()
@@ -234,6 +242,7 @@ class Block(Base, Become, Conditional, Taggable):
                 setattr(self, attr, data.get(attr))
 
         self._dep_chain = data.get('dep_chain', None)
+        self._eor = data.get('eor', False)
 
         # if there was a serialized role, unpack it too
         role_data = data.get('role')
@@ -255,17 +264,6 @@ class Block(Base, Become, Conditional, Taggable):
             self._parent = p
             self._dep_chain = self._parent.get_dep_chain()
 
-    def evaluate_conditional(self, templar, all_vars):
-        dep_chain = self.get_dep_chain()
-        if dep_chain:
-            for dep in dep_chain:
-                if not dep.evaluate_conditional(templar, all_vars):
-                    return False
-        if self._parent is not None:
-            if not self._parent.evaluate_conditional(templar, all_vars):
-                return False
-        return super(Block, self).evaluate_conditional(templar, all_vars)
-
     def set_loader(self, loader):
         self._loader = loader
         if self._parent:
@@ -281,7 +279,7 @@ class Block(Base, Become, Conditional, Taggable):
     def _get_attr_environment(self):
         return self._get_parent_attribute('environment', extend=True)
 
-    def _get_parent_attribute(self, attr, extend=False):
+    def _get_parent_attribute(self, attr, extend=False, prepend=False):
         '''
         Generic logic to get the attribute or parent attribute for a block value.
         '''
@@ -294,7 +292,7 @@ class Block(Base, Become, Conditional, Taggable):
                 try:
                     parent_value = getattr(self._parent, attr, None)
                     if extend:
-                        value = self._extend_value(value, parent_value)
+                        value = self._extend_value(value, parent_value, prepend)
                     else:
                         value = parent_value
                 except AttributeError:
@@ -303,7 +301,7 @@ class Block(Base, Become, Conditional, Taggable):
                 try:
                     parent_value = getattr(self._role, attr, None)
                     if extend:
-                        value = self._extend_value(value, parent_value)
+                        value = self._extend_value(value, parent_value, prepend)
                     else:
                         value = parent_value
 
@@ -313,7 +311,7 @@ class Block(Base, Become, Conditional, Taggable):
                         for dep in dep_chain:
                             dep_value = getattr(dep, attr, None)
                             if extend:
-                                value = self._extend_value(value, dep_value)
+                                value = self._extend_value(value, dep_value, prepend)
                             else:
                                 value = dep_value
 
@@ -325,7 +323,7 @@ class Block(Base, Become, Conditional, Taggable):
                 try:
                     parent_value = getattr(self._play, attr, None)
                     if extend:
-                        value = self._extend_value(value, parent_value)
+                        value = self._extend_value(value, parent_value, prepend)
                     else:
                         value = parent_value
                 except AttributeError:

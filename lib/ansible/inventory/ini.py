@@ -38,6 +38,8 @@ class InventoryParser(object):
     Takes an INI-format inventory file and builds a list of groups and subgroups
     with their associated hosts and variable settings.
     """
+    _COMMENT_MARKERS = frozenset((u';', u'#'))
+    b_COMMENT_MARKERS = frozenset((b';', b'#'))
 
     def __init__(self, loader, groups, filename=C.DEFAULT_HOST_LIST):
         self.filename = filename
@@ -51,18 +53,28 @@ class InventoryParser(object):
 
         # Read in the hosts, groups, and variables defined in the
         # inventory file.
+        if loader:
+            (b_data, private) = loader._get_file_contents(filename)
+        else:
+            with open(filename, 'rb') as fh:
+                b_data = fh.read()
 
-        with open(filename, 'rb') as fh:
-            data = fh.read()
-            try:
-                # Faster to do to_text once on a long string than many
-                # times on smaller strings
-                data = to_text(data, errors='surrogate_or_strict')
-                data = [line for line in data.splitlines() if not (line.startswith(u';') or line.startswith(u'#'))]
-            except UnicodeError:
-                # Skip comment lines here to avoid potential undecodable
-                # errors in comments: https://github.com/ansible/ansible/issues/17593
-                data = [to_text(line, errors='surrogate_or_strict') for line in data.splitlines() if not (line.startswith(b';') or line.startswith(b'#'))]
+        try:
+            # Faster to do to_text once on a long string than many
+            # times on smaller strings
+            data = to_text(b_data, errors='surrogate_or_strict').splitlines()
+        except UnicodeError:
+            # Handle non-utf8 in comment lines: https://github.com/ansible/ansible/issues/17593
+            data = []
+            for line in b_data.splitlines():
+                if line and line[0] in self.b_COMMENT_MARKERS:
+                    # Replace is okay for comment lines
+                    #data.append(to_text(line, errors='surrogate_or_replace'))
+                    # Currently we only need these lines for accurate lineno in errors
+                    data.append(u'')
+                else:
+                    # Non-comment lines still have to be valid uf-8
+                    data.append(to_text(line, errors='surrogate_or_strict'))
 
         self._parse(data)
 
@@ -92,8 +104,8 @@ class InventoryParser(object):
 
             line = line.strip()
 
-            # Skip empty lines
-            if not line:
+            # Skip empty lines and comments
+            if not line or line[0] in self._COMMENT_MARKERS:
                 continue
 
             # Is this a [section] header? That tells us what group we're parsing

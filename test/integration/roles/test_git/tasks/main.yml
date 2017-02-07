@@ -31,6 +31,7 @@
     repo_update_url_1: 'https://github.com/ansible-test-robinro/git-test-old'
     repo_update_url_2: 'https://github.com/ansible-test-robinro/git-test-new'
     repo_depth_url: 'https://github.com/ansible-test-robinro/git-test-shallow-depth'
+    repo_verify: 'https://github.com/pixelrebel/ansible-git-test.git'
     known_host_files:
       - "{{ lookup('env','HOME') }}/.ssh/known_hosts"
       - '/etc/ssh/ssh_known_hosts'
@@ -45,6 +46,10 @@
 - name: get git version, only newer than {{git_version_supporting_depth}} has fixed git depth
   shell: git --version | grep 'git version' | sed 's/git version //'
   register: git_version
+
+- name: get gpg version
+  shell: gpg --version 2>1 | head -1 | sed -e 's/gpg (GnuPG) //'
+  register: gpg_version
 
 - name: set dummy git config
   shell: git config --global user.email "noreply@example.com"; git config --global user.name "Ansible Test Runner"
@@ -442,7 +447,7 @@
 - name: clear checkout_dir
   file: state=absent path={{ checkout_dir }}
 
-- name: Clone example git repo that we're going to modify
+- name: "Clone example git repo that we're going to modify"
   git:
     repo: '{{ repo_update_url_1 }}'
     dest: '{{ checkout_dir }}/repo'
@@ -647,9 +652,6 @@
   register: git_fetch
   ignore_errors: yes
 
-- name: read file
-  shell: cat {{ checkout_dir }}/a
-
 - name: check update arrived
   assert:
     that:
@@ -659,3 +661,163 @@
 - name: clear checkout_dir
   file: state=absent path={{ checkout_dir }}
 
+
+  # Test for tag verification
+  # clone a repo checkout signed tag, verify tag
+
+- name: Import Jamie Evans GPG key
+  command: gpg --keyserver keyserver.ubuntu.com --recv-key 61107C8E
+  when: >
+    not gpg_version.stderr and
+    gpg_version.stdout and
+    (git_version.stdout | version_compare("2.1.0", '>=') or
+    gpg_version.stdout | version_compare("1.4.16", '>='))
+  
+- name: Copy ownertrust
+  copy: "content='2D55902D66FEEBCEA4447C93E79A36DA61107C8E:6:\n' dest=/tmp/ownertrust-git.txt"
+  when: >
+    not gpg_version.stderr and
+    gpg_version.stdout and
+    (git_version.stdout | version_compare("2.1.0", '>=') or
+    gpg_version.stdout | version_compare("1.4.16", '>='))
+
+- name: Import ownertrust
+  command: gpg --import-ownertrust /tmp/ownertrust-git.txt
+  when: >
+    not gpg_version.stderr and
+    gpg_version.stdout and
+    (git_version.stdout | version_compare("2.1.0", '>=') or
+    gpg_version.stdout | version_compare("1.4.16", '>='))
+
+- name: Clone signed repo and verify tag
+  git: repo={{ repo_verify }} dest={{ checkout_dir }} version=v0.0 verify_commit=yes
+  when: >
+    not gpg_version.stderr and
+    gpg_version.stdout and
+    (git_version.stdout | version_compare("2.1.0", '>=') or
+    gpg_version.stdout | version_compare("1.4.16", '>='))
+
+- name: Remove Jamie Evans GPG key
+  command: gpg --batch --yes --delete-key 61107C8E
+  when: >
+    not gpg_version.stderr and
+    gpg_version.stdout and
+    (git_version.stdout | version_compare("2.1.0", '>=') or
+    gpg_version.stdout | version_compare("1.4.16", '>='))
+
+- name: Clean up files
+  file: path="{{ item }}" state=absent
+  with_items:
+    - "{{ checkout_dir }}"
+    - /tmp/ownertrust-git.txt
+  when: >
+    not gpg_version.stderr and
+    gpg_version.stdout and
+    (git_version.stdout | version_compare("2.1.0", '>=') or
+    gpg_version.stdout | version_compare("1.4.16", '>='))
+
+- name: clear checkout_dir
+  file: state=absent path={{ checkout_dir }}
+
+# test for https://github.com/ansible/ansible-modules-core/pull/5505
+- name: prepare old git repo
+  shell: rm -rf localmods; mkdir localmods; cd localmods; git init; echo "1" > a; git add a; git commit -m "1"
+  args:
+    chdir: "{{repo_dir}}"
+
+- name: checkout old repo
+  git:
+    repo: '{{ repo_dir }}/localmods'
+    dest: '{{ checkout_dir }}'
+
+- name: "update repo"
+  shell: echo "2" > a; git commit -a -m "2"
+  args:
+    chdir: "{{repo_dir}}/localmods"
+
+- name: "add local mods"
+  shell: echo "3" > a
+  args:
+    chdir: "{{ checkout_dir }}"
+
+- name: fetch with local mods without force (should fail)
+  git:
+    repo: '{{ repo_dir }}/localmods'
+    dest: '{{ checkout_dir }}'
+  register: git_fetch
+  ignore_errors: yes
+
+- name: check fetch with localmods failed
+  assert:
+    that:
+      - git_fetch|failed
+
+- name: fetch with local mods with force
+  git:
+    repo: '{{ repo_dir }}/localmods'
+    dest: '{{ checkout_dir }}'
+    force: True
+  register: git_fetch_force
+  ignore_errors: yes
+
+- name: check update arrived
+  assert:
+    that:
+      - "{{ lookup('file', checkout_dir+'/a' )}} == 2"
+      - git_fetch_force|changed
+
+- name: clear checkout_dir
+  file: state=absent path={{ checkout_dir }}
+
+# localmods and shallow clone
+- name: prepare old git repo
+  shell: rm -rf localmods; mkdir localmods; cd localmods; git init; echo "1" > a; git add a; git commit -m "1"
+  args:
+    chdir: "{{repo_dir}}"
+
+- name: checkout old repo
+  git:
+    repo: '{{ repo_dir }}/localmods'
+    dest: '{{ checkout_dir }}'
+    depth: 1
+
+- name: "update repo"
+  shell: echo "2" > a; git commit -a -m "2"
+  args:
+    chdir: "{{repo_dir}}/localmods"
+
+- name: "add local mods"
+  shell: echo "3" > a
+  args:
+    chdir: "{{ checkout_dir }}"
+
+- name: fetch with local mods without force (should fail)
+  git:
+    repo: '{{ repo_dir }}/localmods'
+    dest: '{{ checkout_dir }}'
+    depth: 1
+  register: git_fetch
+  ignore_errors: yes
+
+- name: check fetch with localmods failed
+  assert:
+    that:
+      - git_fetch|failed
+
+- name: fetch with local mods with force
+  git:
+    repo: '{{ repo_dir }}/localmods'
+    dest: '{{ checkout_dir }}'
+    depth: 1
+    force: True
+  register: git_fetch_force
+  ignore_errors: yes
+
+- name: check update arrived
+  assert:
+    that:
+      - "{{ lookup('file', checkout_dir+'/a' )}} == 2"
+      - git_fetch_force|changed
+
+- name: clear checkout_dir
+  file: state=absent path={{ checkout_dir }}

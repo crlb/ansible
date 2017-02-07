@@ -221,7 +221,7 @@ class PluginLoader:
                 self._extra_dirs.append(directory)
                 self._paths = None
 
-    def find_plugin(self, name, mod_type=''):
+    def find_plugin(self, name, mod_type='', ignore_deprecated=False):
         ''' Find a plugin named name '''
 
         if mod_type:
@@ -297,7 +297,7 @@ class PluginLoader:
             alias_name = '_' + name
             # We've already cached all the paths at this point
             if alias_name in pull_cache:
-                if not os.path.islink(pull_cache[alias_name]):
+                if not ignore_deprecated and not os.path.islink(pull_cache[alias_name]):
                     display.deprecated('%s is kept for backwards compatibility '
                               'but usage is discouraged. The module '
                               'documentation details page may explain '
@@ -373,6 +373,7 @@ class PluginLoader:
     def all(self, *args, **kwargs):
         ''' instantiates all plugins with the same arguments '''
 
+        path_only = kwargs.pop('path_only', False)
         class_only = kwargs.pop('class_only', False)
         all_matches = []
         found_in_cache = True
@@ -383,6 +384,10 @@ class PluginLoader:
         for path in sorted(all_matches, key=lambda match: os.path.basename(match)):
             name, _ = os.path.splitext(path)
             if '__init__' in name:
+                continue
+
+            if path_only:
+                yield path
                 continue
 
             if path not in self._module_cache:

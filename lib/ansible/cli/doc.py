@@ -89,7 +89,7 @@ class DocCLI(CLI):
 
             try:
                 # if the module lives in a non-python file (eg, win_X.ps1), require the corresponding python file for docs
-                filename = module_loader.find_plugin(module, mod_type='.py')
+                filename = module_loader.find_plugin(module, mod_type='.py', ignore_deprecated=True)
                 if filename is None:
                     display.warning("module %s not found in %s\n" % (module, DocCLI.print_paths(module_loader)))
                     continue
@@ -100,7 +100,7 @@ class DocCLI(CLI):
                 try:
                     doc, plainexamples, returndocs = module_docs.get_docstring(filename, verbose=(self.options.verbosity > 0))
                 except:
-                    display.vvv(traceback.print_exc())
+                    display.vvv(traceback.format_exc())
                     display.error("module %s has a documentation error formatting or is missing documentation\nTo see exact traceback use -vvv" % module)
                     continue
 
@@ -133,10 +133,11 @@ class DocCLI(CLI):
                     # probably a quoting issue.
                     raise AnsibleError("Parsing produced an empty object.")
             except Exception as e:
-                display.vvv(traceback.print_exc())
+                display.vvv(traceback.format_exc())
                 raise AnsibleError("module %s missing documentation (or could not parse documentation): %s\n" % (module, str(e)))
 
-        self.pager(text)
+        if text:
+            self.pager(text)
         return 0
 
     def find_modules(self, path):
@@ -173,7 +174,7 @@ class DocCLI(CLI):
                 continue
 
             # if the module lives in a non-python file (eg, win_X.ps1), require the corresponding python file for docs
-            filename = module_loader.find_plugin(module, mod_type='.py')
+            filename = module_loader.find_plugin(module, mod_type='.py', ignore_deprecated=True)
 
             if filename is None:
                 continue

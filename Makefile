@@ -47,7 +47,7 @@ else
 GITINFO = ""
 endif
 
-ifeq ($(shell echo $(OS) | egrep -c 'Darwin|FreeBSD|OpenBSD'),1)
+ifeq ($(shell echo $(OS) | egrep -c 'Darwin|FreeBSD|OpenBSD|DragonFly'),1)
 DATE := $(shell date -j -r $(shell git log -n 1 --format="%at") +%Y%m%d%H%M)
 else
 DATE := $(shell date --utc --date="$(GIT_DATE)" +%Y%m%d%H%M)
@@ -76,6 +76,12 @@ DEBUILD = $(DEBUILD_BIN) $(DEBUILD_OPTS)
 DEB_PPA ?= ppa
 # Choose the desired Ubuntu release: lucid precise saucy trusty
 DEB_DIST ?= unstable
+
+# pbuilder parameters
+PBUILDER_ARCH ?= amd64
+PBUILDER_CACHE_DIR = /var/cache/pbuilder
+PBUILDER_BIN ?= pbuilder
+PBUILDER_OPTS ?= --debootstrapopts --variant=buildd --architecture $(PBUILDER_ARCH) --debbuildopts -b
 
 # RPM build parameters
 RPMSPECDIR= packaging/rpm
@@ -230,7 +236,23 @@ debian: sdist
         sed -ie "s|%VERSION%|$(VERSION)|g;s|%RELEASE%|$(DEB_RELEASE)|;s|%DIST%|$${DIST}|g;s|%DATE%|$(DEB_DATE)|g" deb-build/$${DIST}/$(NAME)-$(VERSION)/debian/changelog ; \
 	done
 
-deb: debian
+deb: deb-src
+	@for DIST in $(DEB_DIST) ; do \
+	    PBUILDER_OPTS="$(PBUILDER_OPTS) --distribution $${DIST} --basetgz $(PBUILDER_CACHE_DIR)/$${DIST}-$(PBUILDER_ARCH)-base.tgz --buildresult $(CURDIR)/deb-build/$${DIST}" ; \
+	    $(PBUILDER_BIN) create $${PBUILDER_OPTS} --othermirror "deb http://archive.ubuntu.com/ubuntu $${DIST} universe" ; \
+	    $(PBUILDER_BIN) update $${PBUILDER_OPTS} ; \
+	    $(PBUILDER_BIN) build $${PBUILDER_OPTS} deb-build/$${DIST}/$(NAME)_$(VERSION)-$(DEB_RELEASE)~$${DIST}.dsc ; \
+	done
+	@echo "#############################################"
+	@echo "Ansible DEB artifacts:"
+	@for DIST in $(DEB_DIST) ; do \
+	    echo deb-build/$${DIST}/$(NAME)_$(VERSION)-$(DEB_RELEASE)~$${DIST}_amd64.changes ; \
+	done
+	@echo "#############################################"
+
+# Build package outside of pbuilder, with locally installed dependencies.
+# Install BuildRequires as noted in packaging/debian/control.
+local_deb: debian
 	@for DIST in $(DEB_DIST) ; do \
 	    (cd deb-build/$${DIST}/$(NAME)-$(VERSION)/ && $(DEBUILD) -b) ; \
 	done

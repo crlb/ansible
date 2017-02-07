@@ -34,29 +34,8 @@ import pwd
 
 from ansible.module_utils.basic import get_all_subclasses
 from ansible.module_utils.six import PY3, iteritems
-from ansible.module_utils._text import to_native
-
-# py2 vs py3; replace with six via ansiballz
-try:
-    # python2
-    import ConfigParser as configparser
-except ImportError:
-    # python3
-    import configparser
-
-try:
-    # python2
-    from StringIO import StringIO
-except ImportError:
-    # python3
-    from io import StringIO
-
-try:
-    # python2
-    from string import maketrans
-except ImportError:
-    # python3
-    maketrans = str.maketrans # TODO: is this really identical?
+from ansible.module_utils.six.moves import configparser, StringIO, reduce
+from ansible.module_utils._text import to_native, to_text
 
 try:
     import selinux
@@ -349,11 +328,15 @@ class Facts(object):
         else:
             proc_1 = os.path.basename(proc_1)
 
+        # The ps command above may return "COMMAND" if the user cannot read /proc, e.g. with grsecurity
+        if proc_1 == "COMMAND\n":
+            proc_1 = None
+
         if proc_1 is not None:
             proc_1 = to_native(proc_1)
             proc_1 = proc_1.strip()
 
-        if proc_1 == 'init' or proc_1.endswith('sh'):
+        if proc_1 is not None and (proc_1 == 'init' or proc_1.endswith('sh')):
             # many systems return init, so this cannot be trusted, if it ends in 'sh' it probalby is a shell in a container
             proc_1 = None
 
@@ -647,11 +630,11 @@ class Distribution(object):
         SLC = 'RedHat', Ascendos = 'RedHat', CloudLinux = 'RedHat', PSBM = 'RedHat',
         OracleLinux = 'RedHat', OVS = 'RedHat', OEL = 'RedHat', Amazon = 'RedHat',
         XenServer = 'RedHat', Ubuntu = 'Debian', Debian = 'Debian', Raspbian = 'Debian', Slackware = 'Slackware', SLES = 'Suse',
-        SLED = 'Suse', openSUSE = 'Suse', SuSE = 'Suse', SLES_SAP = 'Suse', Gentoo = 'Gentoo', Funtoo = 'Gentoo',
+        SLED = 'Suse', openSUSE = 'Suse', openSUSE_Tumbleweed = 'Suse', SuSE = 'Suse', SLES_SAP = 'Suse', SUSE_LINUX = 'Suse', Gentoo = 'Gentoo', Funtoo = 'Gentoo',
         Archlinux = 'Archlinux', Manjaro = 'Archlinux', Mandriva = 'Mandrake', Mandrake = 'Mandrake', Altlinux = 'Altlinux',
         Solaris = 'Solaris', Nexenta = 'Solaris', OmniOS = 'Solaris', OpenIndiana = 'Solaris',
         SmartOS = 'Solaris', AIX = 'AIX', Alpine = 'Alpine', MacOSX = 'Darwin',
-        FreeBSD = 'FreeBSD', HPUX = 'HP-UX', openSUSE_Leap = 'Suse'
+        FreeBSD = 'FreeBSD', HPUX = 'HP-UX', openSUSE_Leap = 'Suse', Neon = 'Debian'
     )
 
     def __init__(self, module):
@@ -1023,11 +1006,11 @@ class LinuxHardware(Hardware):
             key = data[0]
             if key in self.ORIGINAL_MEMORY_FACTS:
                 val = data[1].strip().split(' ')[0]
-                self.facts["%s_mb" % key.lower()] = int(val) / 1024
+                self.facts["%s_mb" % key.lower()] = int(val) // 1024
 
             if key in self.MEMORY_FACTS:
                  val = data[1].strip().split(' ')[0]
-                 memstats[key.lower()] = int(val) / 1024
+                 memstats[key.lower()] = int(val) // 1024
 
         if None not in (memstats.get('memtotal'), memstats.get('memfree')):
             memstats['real:used'] = memstats['memtotal'] - memstats['memfree']
@@ -1227,7 +1210,11 @@ class LinuxHardware(Hardware):
                     self.facts[k] = 'NA'
 
     def _run_lsblk(self, lsblk_path):
-        args = ['--list', '--noheadings', '--paths',  '--output', 'NAME,UUID']
+        # call lsblk and collect all uuids
+        # --exclude 2 makes lsblk ignore floppy disks, which are slower to answer than typical timeouts
+        # this uses the linux major device number
+        # for details see https://www.kernel.org/doc/Documentation/devices.txt
+        args = ['--list', '--noheadings', '--paths',  '--output', 'NAME,UUID', '--exclude', '2']
         cmd = [lsblk_path] + args
         rc, out, err = self.module.run_command(cmd)
         return rc, out, err
@@ -1552,10 +1539,10 @@ class SunOSHardware(Hardware):
         reserved = int(out.split()[5][:-1])
         used = int(out.split()[8][:-1])
         free = int(out.split()[10][:-1])
-        self.facts['swapfree_mb'] = free / 1024
-        self.facts['swaptotal_mb'] = (free + used) / 1024
-        self.facts['swap_allocated_mb'] = allocated / 1024
-        self.facts['swap_reserved_mb'] = reserved / 1024
+        self.facts['swapfree_mb'] = free // 1024
+        self.facts['swaptotal_mb'] = (free + used) // 1024
+        self.facts['swap_allocated_mb'] = allocated // 1024
+        self.facts['swap_reserved_mb'] = reserved // 1024
 
     @timeout(10)
     def get_mount_facts(self):
@@ -1584,7 +1571,6 @@ class OpenBSDHardware(Hardware):
     - devices
     """
     platform = 'OpenBSD'
-    DMESG_BOOT = '/var/run/dmesg.boot'
 
     def populate(self):
         self.sysctl = self.get_sysctl()
@@ -1626,8 +1612,8 @@ class OpenBSDHardware(Hardware):
         #  0 0 0  47512   28160   51   0   0   0   0   0   1   0  116    89   17  0  1 99
         rc, out, err = self.module.run_command("/usr/bin/vmstat")
         if rc == 0:
-            self.facts['memfree_mb'] = int(out.splitlines()[-1].split()[4]) / 1024
-            self.facts['memtotal_mb'] = int(self.sysctl['hw.usermem']) / 1024 / 1024
+            self.facts['memfree_mb'] = int(out.splitlines()[-1].split()[4]) // 1024
+            self.facts['memtotal_mb'] = int(self.sysctl['hw.usermem']) // 1024 // 1024
 
         # Get swapctl info. swapctl output looks like:
         # total: 69268 1K-blocks allocated, 0 used, 69268 available
@@ -1635,26 +1621,26 @@ class OpenBSDHardware(Hardware):
         # total: 69268k bytes allocated = 0k used, 69268k available
         rc, out, err = self.module.run_command("/sbin/swapctl -sk")
         if rc == 0:
-            swaptrans = maketrans(' ', ' ')
-            data = out.split()
-            self.facts['swapfree_mb'] = int(data[-2].translate(swaptrans, "kmg")) / 1024
-            self.facts['swaptotal_mb'] = int(data[1].translate(swaptrans, "kmg")) / 1024
+            swaptrans = { ord(u'k'): None, ord(u'm'): None, ord(u'g'): None}
+            data = to_text(out, errors='surrogate_or_strict').split()
+            self.facts['swapfree_mb'] = int(data[-2].translate(swaptrans)) // 1024
+            self.facts['swaptotal_mb'] = int(data[1].translate(swaptrans)) // 1024
 
     def get_processor_facts(self):
         processor = []
-        dmesg_boot = get_file_content(OpenBSDHardware.DMESG_BOOT)
-        if not dmesg_boot:
-            rc, dmesg_boot, err = self.module.run_command("/sbin/dmesg")
-        i = 0
-        for line in dmesg_boot.splitlines():
-            if line.split(' ', 1)[0] == 'cpu%i:' % i:
-                processor.append(line.split(' ', 1)[1])
-                i = i + 1
-        processor_count = i
+        for i in range(int(self.sysctl['hw.ncpu'])):
+            processor.append(self.sysctl['hw.model'])
+
         self.facts['processor'] = processor
-        self.facts['processor_count'] = processor_count
-        # I found no way to figure out the number of Cores per CPU in OpenBSD
-        self.facts['processor_cores'] = 'NA'
+        # The following is partly a lie because there is no reliable way to
+        # determine the number of physical CPUs in the system. We can only
+        # query the number of logical CPUs, which hides the number of cores.
+        # On amd64/i386 we could try to inspect the smt/core/package lines in
+        # dmesg, however even those have proven to be unreliable.
+        # So take a shortcut and report the logical number of processors in
+        # 'processor_count' and 'processor_cores' and leave it at that.
+        self.facts['processor_count'] = self.sysctl['hw.ncpu']
+        self.facts['processor_cores'] = self.sysctl['hw.ncpu']
 
     def get_device_facts(self):
         devices = []
@@ -1713,8 +1699,8 @@ class FreeBSDHardware(Hardware):
                 pagecount = int(data[1])
             if 'vm.stats.vm.v_free_count' in line:
                 freecount = int(data[1])
-        self.facts['memtotal_mb'] = pagesize * pagecount / 1024 / 1024
-        self.facts['memfree_mb'] = pagesize * freecount / 1024 / 1024
+        self.facts['memtotal_mb'] = pagesize * pagecount // 1024 // 1024
+        self.facts['memfree_mb'] = pagesize * freecount // 1024 // 1024
         # Get swapinfo.  swapinfo output looks like:
         # Device          1M-blocks     Used    Avail Capacity
         # /dev/ada0p3        314368        0   314368     0%
@@ -1725,8 +1711,8 @@ class FreeBSDHardware(Hardware):
             lines.pop()
         data = lines[-1].split()
         if data[0] != 'Device':
-            self.facts['swaptotal_mb'] = int(data[1]) / 1024
-            self.facts['swapfree_mb'] = int(data[3]) / 1024
+            self.facts['swaptotal_mb'] = int(data[1]) // 1024
+            self.facts['swapfree_mb'] = int(data[3]) // 1024
 
     @timeout(10)
     def get_mount_facts(self):
@@ -1855,7 +1841,7 @@ class NetBSDHardware(Hardware):
             key = data[0]
             if key in NetBSDHardware.MEMORY_FACTS:
                 val = data[1].strip().split(' ')[0]
-                self.facts["%s_mb" % key.lower()] = int(val) / 1024
+                self.facts["%s_mb" % key.lower()] = int(val) // 1024
 
     @timeout(10)
     def get_mount_facts(self):
@@ -1925,8 +1911,8 @@ class AIX(Hardware):
                 pagecount = int(data[0])
             if 'free pages' in line:
                 freecount = int(data[0])
-        self.facts['memtotal_mb'] = pagesize * pagecount / 1024 / 1024
-        self.facts['memfree_mb'] = pagesize * freecount / 1024 / 1024
+        self.facts['memtotal_mb'] = pagesize * pagecount // 1024 // 1024
+        self.facts['memfree_mb'] = pagesize * freecount // 1024 // 1024
         # Get swapinfo.  swapinfo output looks like:
         # Device          1M-blocks     Used    Avail Capacity
         # /dev/ada0p3        314368        0   314368     0%
@@ -2067,12 +2053,12 @@ class HPUX(Hardware):
         pagesize = 4096
         rc, out, err = self.module.run_command("/usr/bin/vmstat | tail -1", use_unsafe_shell=True)
         data = int(re.sub(' +',' ',out).split(' ')[5].strip())
-        self.facts['memfree_mb'] = pagesize * data / 1024 / 1024
+        self.facts['memfree_mb'] = pagesize * data // 1024 // 1024
         if self.facts['architecture'] == '9000/800':
             try:
                 rc, out, err = self.module.run_command("grep Physical /var/adm/syslog/syslog.log")
                 data = re.search('.*Physical: ([0-9]*) Kbytes.*',out).groups()[0].strip()
-                self.facts['memtotal_mb'] = int(data) / 1024
+                self.facts['memtotal_mb'] = int(data) // 1024
             except AttributeError:
                 #For systems where memory details aren't sent to syslog or the log has rotated, use parsed
                 #adb output. Unfortunately /dev/kmem doesn't have world-read, so this only works as root.
@@ -2163,11 +2149,11 @@ class Darwin(Hardware):
             self.facts['processor_cores'] = self.sysctl['hw.physicalcpu']
 
     def get_memory_facts(self):
-        self.facts['memtotal_mb'] = int(self.sysctl['hw.memsize']) / 1024 / 1024
+        self.facts['memtotal_mb'] = int(self.sysctl['hw.memsize']) // 1024 // 1024
 
         rc, out, err = self.module.run_command("sysctl hw.usermem")
         if rc == 0:
-            self.facts['memfree_mb'] = int(out.splitlines()[-1].split()[1]) / 1024 / 1024
+            self.facts['memfree_mb'] = int(out.splitlines()[-1].split()[1]) // 1024 // 1024
 
 
 class Network(Facts):
@@ -3356,21 +3342,22 @@ class SunOSVirtual(Virtual):
 
         else:
             smbios = self.module.get_bin_path('smbios')
-            rc, out, err = self.module.run_command(smbios)
-            if rc == 0:
-                for line in out.split('\n'):
-                    if 'VMware' in line:
-                        self.facts['virtualization_type'] = 'vmware'
-                        self.facts['virtualization_role'] = 'guest'
-                    elif 'Parallels' in line:
-                        self.facts['virtualization_type'] = 'parallels'
-                        self.facts['virtualization_role'] = 'guest'
-                    elif 'VirtualBox' in line:
-                        self.facts['virtualization_type'] = 'virtualbox'
-                        self.facts['virtualization_role'] = 'guest'
-                    elif 'HVM domU' in line:
-                        self.facts['virtualization_type'] = 'xen'
-                        self.facts['virtualization_role'] = 'guest'
+            if smbios:
+                rc, out, err = self.module.run_command(smbios)
+                if rc == 0:
+                    for line in out.split('\n'):
+                        if 'VMware' in line:
+                            self.facts['virtualization_type'] = 'vmware'
+                            self.facts['virtualization_role'] = 'guest'
+                        elif 'Parallels' in line:
+                            self.facts['virtualization_type'] = 'parallels'
+                            self.facts['virtualization_role'] = 'guest'
+                        elif 'VirtualBox' in line:
+                            self.facts['virtualization_type'] = 'virtualbox'
+                            self.facts['virtualization_role'] = 'guest'
+                        elif 'HVM domU' in line:
+                            self.facts['virtualization_type'] = 'xen'
+                            self.facts['virtualization_role'] = 'guest'
 
 class Ohai(Facts):
     """
