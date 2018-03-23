@@ -1,6 +1,18 @@
 Ansible Changes By Release
 ==========================
 
+<a id="2.3.4"></a>
+
+## 2.3.4 "Ramble On" - TBD
+* Flush stdin when passing the become password.  Fixes some cases of timeout on
+  Python3 with the ssh connection plugin: https://github.com/ansible/ansible/pull/35049
+
+### Bugfixes
+* Fix setting of environment in a task that uses a loop:
+  https://github.com/ansible/ansible/issues/32685
+* Fix https retrieval with TLSv1.2: https://github.com/ansible/ansible/pull/32053
+
+
 <a id="2.3.3"></a>
 
 ## 2.3.3 "Ramble On" - TBD
@@ -54,9 +66,12 @@ Ansible Changes By Release
 * Use safe_load instead on load to read a yaml document
 * Fix for win_file to respect check mode when deleting directories
 * Include_role now complains about invalid arguments
-
+* Added socket conditions to ignore for wait_for, no need to error for closing already closed connection
+* Updated hostname module to work on newer RHEL7 releases
+* Security fix to avoid provider password leaking in logs for network modules
 
 <a id="2.3.2"></a>
+* Python3 fixes for azure modules
 
 ## 2.3.2 "Ramble On" - 2017-08-04
 

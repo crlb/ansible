@@ -17,8 +17,8 @@ matrix:
 
     - env: TEST=osx/10.11
 
-    - env: TEST=freebsd/10.3-STABLE
-    - env: TEST=freebsd/11.0-STABLE
+    - env: TEST=freebsd/10.4
+    - env: TEST=freebsd/11.1
 
     - env: TEST=windows/1
     - env: TEST=windows/2
@@ -29,7 +29,6 @@ matrix:
     - env: TEST=linux/fedora24/1
     - env: TEST=linux/fedora25/1
     - env: TEST=linux/ubuntu1204/1
-    - env: TEST=linux/opensuse42.2/1
     - env: TEST=linux/opensuse42.3/1
     - env: TEST=linux/ubuntu1404/1
     - env: TEST=linux/ubuntu1604/1
@@ -40,7 +39,6 @@ matrix:
     - env: TEST=linux/fedora24/2
     - env: TEST=linux/fedora25/2
     - env: TEST=linux/ubuntu1204/2
-    - env: TEST=linux/opensuse42.2/2
     - env: TEST=linux/opensuse42.3/2
     - env: TEST=linux/ubuntu1404/2
     - env: TEST=linux/ubuntu1604/2
@@ -50,19 +48,15 @@ matrix:
     - env: TEST=linux/centos7/3
     - env: TEST=linux/fedora24/3
     - env: TEST=linux/fedora25/3
-    - env: TEST=linux/opensuse42.2/3
     - env: TEST=linux/opensuse42.3/3
     - env: TEST=linux/ubuntu1204/3
     - env: TEST=linux/ubuntu1404/3
     - env: TEST=linux/ubuntu1604/3
     - env: TEST=linux/ubuntu1604py3/3
 build:
-  pre_ci:
-    - docker images drydock/u16pytall
   pre_ci_boot:
     image_name: drydock/u16pytall
-    image_tag: master
-    pull: false
+    image_tag: v5.4.1
     options: "--privileged=false --net=bridge"
   ci:
     - test/utils/shippable/timing.sh test/utils/shippable/shippable.sh
